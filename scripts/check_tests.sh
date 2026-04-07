@@ -1,13 +1,20 @@
 #!/bin/bash
 # Test runner with strict mode support - matches CI test runner
 
+# Detect working Python: prefer python3 (Linux/CI), fall back to python (Windows)
+if python3 -c "import pytest" >/dev/null 2>&1; then
+    PYTHON=python3
+else
+    PYTHON=python
+fi
+
 STRICT_MODE=false
 if [[ "$1" == "--strict" ]]; then
     STRICT_MODE=true
 fi
 
 echo "Running unit tests..."
-if python3 tests/run_tests.py --unit; then
+if $PYTHON tests/run_tests.py --unit; then
     echo "✅ All tests passed!"
     exit 0
 else
