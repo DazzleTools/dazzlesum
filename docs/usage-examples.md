@@ -1,6 +1,6 @@
 # Usage Examples
 
-This document provides practical examples for common dazzlesum use cases (v1.3.5+).
+This document provides practical examples for common dazzlesum use cases (v1.3.6+).
 
 ## Basic Workflow
 
