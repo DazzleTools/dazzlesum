@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Directory counting stage now respects --exclude patterns (excluded dirs were inflating progress totals)
 - Fixed shadow-dir verify resolving filenames against source root instead of current directory (100% false "missing" failures)
 - Replaced Unicode box-drawing and progress bar characters with ASCII equivalents for Windows codepage compatibility
+- Added UTF-8 encoding with replace error handling to all 7 subprocess calls (prevents crashes on non-ASCII filenames)
 - Removed stale .repokit.json and root-level install-hooks.sh (replaced by scripts/install-hooks.sh)
 
 ## [1.3.5] - 2025-06-29
