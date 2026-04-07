@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# Pre-commit hook for dazzlesum static versioning
+# Updates __version__ string in dazzlesum.py with build information
+# Format: MAJOR.MINOR.PATCH_(Build#)-YYYYMMDD-CommitHash
+#
+
+set -e
+
+# Configuration
+SOURCE_FILE="dazzlesum.py"
+VERSION_PATTERN='__version__ = ".*"'
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}[Version Hook]${NC} Updating version in $SOURCE_FILE..."
+
+# Check if source file exists
+if [ ! -f "$SOURCE_FILE" ]; then
+    echo -e "${RED}[Version Hook]${NC} Error: $SOURCE_FILE not found"
+    exit 1
+fi
+
+# Extract base version from source
+if ! BASE_VERSION=$(grep -E "MAJOR, MINOR, PATCH = [0-9, ]+$" "$SOURCE_FILE" | sed 's/.*= //' | tr -d ' ' | tr ',' '.'); then
+    echo -e "${RED}[Version Hook]${NC} Error: Could not extract base version from $SOURCE_FILE"
+    echo "Expected format: MAJOR, MINOR, PATCH = 1, 3, 0"
+    exit 1
+fi
+
+# Get build information with fallbacks
+BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+COMMIT_DATE=$(git log -1 --format=%cd --date=format:%Y%m%d HEAD~1 2>/dev/null || date +%Y%m%d)
+
+# Handle previous commit hash with fallbacks
+if PREV_COMMIT=$(git rev-parse --short=8 HEAD~1 2>/dev/null); then
+    HASH_PART="$PREV_COMMIT"
+elif [ "$BUILD_NUMBER" -eq "0" ]; then
+    # Initial commit case
+    HASH_PART="initial0"
+else
+    # Fallback for shallow repos or other edge cases
+    HASH_PART="shallow0" 
+fi
+
+# Generate version string
+NEW_VERSION="${BASE_VERSION}_${BUILD_NUMBER}-${COMMIT_DATE}-${HASH_PART}"
+
+# Check if version needs updating
+CURRENT_VERSION=$(grep -o '__version__ = ".*"' "$SOURCE_FILE" | cut -d'"' -f2)
+if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
+    echo -e "${YELLOW}[Version Hook]${NC} Version already up to date: $NEW_VERSION"
+    exit 0
+fi
+
+# Update source file with backup
+echo -e "${GREEN}[Version Hook]${NC} Updating from: $CURRENT_VERSION"
+echo -e "${GREEN}[Version Hook]${NC} Updating to:   $NEW_VERSION"
+
+cp "$SOURCE_FILE" "${SOURCE_FILE}.backup"
+if sed "s/$VERSION_PATTERN/__version__ = \"$NEW_VERSION\"/" "$SOURCE_FILE" > "${SOURCE_FILE}.tmp"; then
+    mv "${SOURCE_FILE}.tmp" "$SOURCE_FILE"
+    rm -f "${SOURCE_FILE}.backup"
+    
+    # Stage the updated file
+    git add "$SOURCE_FILE"
+    
+    echo -e "${GREEN}[Version Hook]${NC} Successfully updated version to: $NEW_VERSION"
+else
+    mv "${SOURCE_FILE}.backup" "$SOURCE_FILE"
+    echo -e "${RED}[Version Hook]${NC} Error: Failed to update version in $SOURCE_FILE"
+    exit 1
+fi
+
+# Verify the update worked
+UPDATED_VERSION=$(grep -o '__version__ = ".*"' "$SOURCE_FILE" | cut -d'"' -f2)
+if [ "$UPDATED_VERSION" != "$NEW_VERSION" ]; then
+    echo -e "${RED}[Version Hook]${NC} Error: Version update verification failed"
+    echo "Expected: $NEW_VERSION"
+    echo "Got: $UPDATED_VERSION"
+    exit 1
+fi
+
+echo -e "${GREEN}[Version Hook]${NC} Version update completed successfully"

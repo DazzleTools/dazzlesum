@@ -1,7 +1,7 @@
 # Dazzlesum
 
 [![GitHub Workflow Status](https://github.com/djdarcy/dazzlesum/actions/workflows/python.yml/badge.svg)](https://github.com/djdarcy/dazzlesum/actions)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/djdarcy/dazzlesum/releases/tag/v1.3.0)
+[![Version](https://img.shields.io/badge/version-1.3.6-blue.svg)](https://github.com/djdarcy/dazzlesum/releases/tag/v1.3.6)
 [![Python Version](https://img.shields.io/badge/python-%3E%3D3.7-brightgreen)](https://python.org)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
@@ -16,7 +16,10 @@ Dazzlesum is a handy checksum tool designed for data integrity verification acro
 - **Flexible Generation Modes**: Individual `.shasum` files per directory, monolithic files, or both simultaneously
 - **Advanced Verification**: Problems-only output shows only failed, missing, or extra files by default
 - **Management Operations**: Backup, remove, restore, and list `.shasum` files with comprehensive metadata
-- **Enhanced Logging**: Multiple verbosity levels with visual directory separation and progress tracking
+- **Enhanced Logging**: 11-level verbosity system (-6 to +4) with granular output control and smart filtering
+- **Advanced Exit Codes**: 7 different exit codes based on aggregate verification results for precise automation
+- **Squelch System**: Filter specific message types (SUCCESS, NO_SHASUM) for customized output
+- **Context-Aware Operations**: Auto-detects whether to create or verify based on directory contents
 - **Shadow Directory Support**: Keep source directories clean by storing checksum files in parallel shadow structure
 
 ## Use Cases
@@ -84,8 +87,14 @@ dazzlesum create -r
 # Create monolithic checksum file
 dazzlesum create -r --mode monolithic
 
-# Generate with verbose output
+# Generate with verbose output (11 levels available: -6 to +4)
 dazzlesum create -r -vv
+
+# Silent mode for automation
+dazzlesum verify -r -qqqqqq
+
+# Problems-only with custom squelch filters
+dazzlesum verify -r --squelch=SUCCESS,NO_SHASUM
 
 # Keep source directories clean with shadow directory
 dazzlesum create -r --shadow-dir ./checksums
@@ -222,5 +231,4 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
 ---
 
-Made with ️☕ for reliable, consistent data integrity verification across all platforms.
-# Testing static versioning hook
+Made with ️☕. Designed for reliable, consistent data integrity verification across all platforms.

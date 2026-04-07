@@ -56,8 +56,8 @@ class TestCLIInterface(unittest.TestCase):
     def test_version_command(self):
         """Test version command."""
         result = self.run_dazzlesum(["--version"])
-        # Should contain base version 1.3.0, possibly with build info
-        self.assertIn("1.3.0", result.stdout)
+        # Match semantic version pattern dynamically
+        self.assertRegex(result.stdout, r'dazzlesum \d+\.\d+\.\d+(_\d+-\d{8}-[a-f0-9]{8})?')
     
     def test_create_subcommand_help(self):
         """Test create subcommand help."""
@@ -143,11 +143,10 @@ class TestCLIInterface(unittest.TestCase):
         
         # Then verify them
         mono_file = self.test_dir / "checksums.sha256"
-        result = self.run_dazzlesum(["verify", "--checksum-file", str(mono_file), str(self.test_dir)], expect_success=False)
-        # Note: This test expects exit code 5 due to the temporary file being included in checksums
-        # but not present during verification. This is a known behavior.
-        self.assertEqual(result.returncode, 5)  # MANY FAILS due to missing .tmp file
-        self.assertIn("verified", result.stderr)  # But the actual files are verified
+        result = self.run_dazzlesum(["verify", "--checksum-file", str(mono_file), "--show-all", str(self.test_dir)])
+        # Note: .tmp files are now excluded from monolithic checksums, so verification should succeed
+        self.assertEqual(result.returncode, 0)  # Success - no missing .tmp file
+        self.assertIn("OK", result.stderr)  # Files are verified successfully
     
     def test_deprecated_syntax_rejected(self):
         """Test that old syntax is no longer supported."""
@@ -206,12 +205,15 @@ class TestCLIInterface(unittest.TestCase):
     
     def test_argument_validation(self):
         """Test argument validation for different subcommands."""
-        # Test monolithic mode without recursive flag
-        result = self.run_dazzlesum([
+        # Test monolithic mode without recursive flag shows interactive prompt
+        result = subprocess.run([
+            sys.executable, str(self.script_path),
             "create", "--mode", "monolithic", str(self.test_dir)
-        ], expect_success=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Monolithic modes require --recursive", result.stderr)
+        ], input="n\n", capture_output=True, text=True)
+        
+        self.assertEqual(result.returncode, 0)  # User chose to cancel, not an error
+        self.assertIn("Monolithic mode works by creating a single checksum file", result.stdout)
+        self.assertIn("Operation cancelled", result.stdout)
 
 
 if __name__ == '__main__':

@@ -272,13 +272,13 @@ class TestSquelchAndGrandTotals(unittest.TestCase):
         """Test that single directory verification doesn't show grand totals."""
         self.create_test_checksums()
         
-        # Verify just one directory
-        result = self.run_dazzlesum(["verify", str(self.test_path / "success_dir")])
+        # Verify just one directory with --show-all to see the SUCCESS message
+        result = self.run_dazzlesum(["verify", "--show-all", str(self.test_path / "success_dir")])
         
         # Should NOT show grand totals for single directory
         self.assertNotIn("=== GRAND TOTALS ===", result.stderr)
         
-        # Should show normal directory result
+        # Should show normal directory result when using --show-all
         self.assertIn("100%/0% SUCCESS", result.stderr)
 
     def test_grand_totals_directory_categorization(self):

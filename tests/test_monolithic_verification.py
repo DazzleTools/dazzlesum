@@ -197,9 +197,13 @@ class TestMonolithicVerification(unittest.TestCase):
             if not file_path.exists():
                 missing_files.append(filename)
         
-        # Should detect subdir/file3.txt as missing
+        # Should detect subdir/file3.txt as missing (intentionally deleted)
+        # Note: .tmp files are now excluded from monolithic checksums
         self.assertIn("subdir/file3.txt", missing_files)
         self.assertEqual(len(missing_files), 1)
+        # Verify no .tmp files are expected (they're excluded)
+        tmp_files = [f for f in missing_files if f.endswith('.tmp')]
+        self.assertEqual(len(tmp_files), 0)
 
     def test_monolithic_file_format_compliance(self):
         """Test that monolithic files are compatible with standard tools."""
@@ -272,15 +276,22 @@ class TestMonolithicVerification(unittest.TestCase):
         data_lines = [line for line in content.split('\n') 
                      if line and not line.startswith('#')]
         
-        # Should have 50 files (10 dirs * 5 files)
+        # Should have 50 files (50 actual files, .tmp file is now excluded)
         self.assertEqual(len(data_lines), 50)
         
         # Verify paths are properly formatted
+        # Count actual content files (should be 50, no .tmp files included)
+        content_files = 0
+        tmp_files = 0
         for line in data_lines:
             hash_val, filename = line.split('  ', 1)
-            self.assertTrue(filename.startswith('dir_'))
-            self.assertTrue(filename.endswith('.txt'))
-            self.assertIn('/', filename)  # Should contain directory separator
+            if filename.startswith('dir_'):
+                content_files += 1
+            elif filename.endswith('.tmp'):
+                tmp_files += 1
+        
+        self.assertEqual(content_files, 50)  # 10 dirs * 5 files each
+        self.assertEqual(tmp_files, 0)  # Temporary files are now excluded
 
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@ import os
 # Read version from dazzlesum.py
 
 def get_version():
-    with open('dazzlesum.py', 'r') as f:
+    with open('dazzlesum.py', 'r', encoding='utf-8') as f:
         content = f.read()
         
         # Extract MAJOR, MINOR, PATCH for PEP 440 compliant version

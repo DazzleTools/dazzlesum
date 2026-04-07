@@ -1,6 +1,6 @@
 # Usage Examples
 
-This document provides practical examples for common dazzlesum use cases (v1.3.0+).
+This document provides practical examples for common dazzlesum use cases (v1.3.6+).
 
 ## Basic Workflow
 
@@ -23,6 +23,12 @@ dazzlesum verify -r
 
 # Verbose verification to see what's happening
 dazzlesum verify -r -v
+
+# Silent mode for automation (11 verbosity levels: -6 to +4)
+dazzlesum verify -r -qqqqqq
+
+# Filter specific output types
+dazzlesum verify -r --squelch SUCCESS,NO_SHASUM
 
 # Show all files, not just problems
 dazzlesum verify -r --show-all-verifications

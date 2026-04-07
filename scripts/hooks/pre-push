@@ -1,0 +1,70 @@
+#!/bin/bash
+#
+# Pre-push hook for dazzlesum - Branch-aware quality validation
+# 
+# This hook implements tiered validation:
+# - main branch: Strict mode - block on any failures
+# - dev branch: Informational mode - report but don't block  
+# - feature branches: Minimal validation - syntax only
+#
+
+# Change to repository root
+cd "$(git rev-parse --show-toplevel)"
+
+CURRENT_BRANCH=$(git branch --show-current)
+echo "🔍 Pre-push validation for branch: $CURRENT_BRANCH"
+
+if [[ "$CURRENT_BRANCH" == "main" ]]; then
+    # STRICT MODE - Block on any failures
+    echo "🚨 Strict validation mode (main branch)"
+    
+    ./scripts/check_lint.sh --strict || {
+        echo "❌ BLOCKED: Lint errors on main branch"
+        echo "💡 Fix all linting issues before pushing to main"
+        exit 1
+    }
+    
+    ./scripts/check_tests.sh --strict || {
+        echo "❌ BLOCKED: Test failures on main branch"  
+        echo "💡 Ensure all tests pass before pushing to main"
+        exit 1
+    }
+    
+    echo "✅ Main branch validation passed"
+    
+elif [[ "$CURRENT_BRANCH" == "dev" ]]; then
+    # INFORMATIONAL MODE - Report but don't block
+    echo "📊 Informational validation mode (dev branch)"
+    
+    LINT_EXIT=0
+    TEST_EXIT=0
+    
+    ./scripts/check_lint.sh || LINT_EXIT=$?
+    ./scripts/check_tests.sh || TEST_EXIT=$?
+    
+    if [[ $LINT_EXIT -ne 0 ]] || [[ $TEST_EXIT -ne 0 ]]; then
+        echo ""
+        echo "⚠️ Issues found but allowing dev branch push"
+        echo "📝 Please address before merging to main"
+        echo "💡 Use './scripts/check_lint.sh --strict' to test main branch readiness"
+    else
+        echo "✅ All validations passed"
+    fi
+    
+    exit 0  # Always allow dev branch pushes
+    
+else
+    # FEATURE BRANCHES - Minimal validation
+    echo "🔧 Minimal validation (feature branch)"
+    
+    python3 -m py_compile dazzlesum.py || {
+        echo "❌ Python syntax errors found"
+        echo "💡 Fix syntax errors before pushing"
+        exit 1
+    }
+    
+    echo "✅ Feature branch validation passed"
+fi
+
+echo ""
+echo "🚀 Push validation complete!"

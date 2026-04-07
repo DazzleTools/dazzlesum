@@ -46,10 +46,10 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
 # Version information
 # Base semantic version (manually maintained for git hooks)
-MAJOR, MINOR, PATCH = 1, 3, 3
+MAJOR, MINOR, PATCH = 1, 3, 6
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.3.3_42-20250629-79eebece"
+__version__ = "1.3.6_43-20250629-7db1ac6d"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""
@@ -394,6 +394,9 @@ color_formatter = None
 # Global exit code for verification operations - will be set by verification results
 verification_exit_code = 0
 
+# Global flag to track if this is an auto-detected command
+is_auto_detected_command = False
+
 # Global verbosity configuration instance
 verbosity_config = None
 
@@ -447,12 +450,12 @@ class VerbosityConfig:
         # Note: True means squelched (hidden), False means shown
         VERBOSITY_SQUELCH_MAP = {
             -6: {'show_output': False},  # Special case: no output at all, only exit codes
-            -5: {'INFO': True,  'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': True},   # Only grand total summary
-            -4: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': False, 'FORCE_SUMMARY': True},  # info/status line + grand total
-            -3: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': False, 'SUMMARY': False},  # FAIL + info/status + grand total
-            -2: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # MISSING + FAIL + info/status + grand total
-            -1: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False, 'EXTRA_SUMMARY': True},  # EXTRA + MISSING + FAIL + info/status + grand total
-             0: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # Current default
+            -5: {'INFO': True,  'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': True},   # Only grand total summary  # noqa: E241
+            -4: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': False, 'FORCE_SUMMARY': True},  # info/status line + grand total  # noqa: E241
+            -3: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': False, 'SUMMARY': False},  # FAIL + info/status + grand total  # noqa: E241
+            -2: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # MISSING + FAIL + info/status + grand total  # noqa: E241
+            -1: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False, 'EXTRA_SUMMARY': True},  # EXTRA + MISSING + FAIL + info/status + grand total  # noqa: E241
+             0: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # Current default  # noqa: E241,E131
             +1: {'INFO': False, 'SUCCESS': False, 'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # Show everything
             # +2 and above: controlled by logger verbosity, not squelch
         }
@@ -476,7 +479,7 @@ class VerbosityConfig:
 
 def initialize_squelch_from_verbosity(verbosity_level):
     """Set global squelch_settings based on verbosity level."""
-    global squelch_settings
+    global squelch_settings  # noqa: F824
     
     if verbosity_config:
         squelch_settings = verbosity_config.get_squelch_settings()
@@ -485,12 +488,12 @@ def initialize_squelch_from_verbosity(verbosity_level):
         # Note: True means squelched (hidden), False means shown
         VERBOSITY_SQUELCH_MAP = {
             -6: {'show_output': False},
-            -5: {'INFO': True,  'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': True},
-            -4: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': False, 'FORCE_SUMMARY': True},
-            -3: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': False, 'SUMMARY': False},
-            -2: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': False, 'FAILS': False, 'SUMMARY': False},
-            -1: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False, 'EXTRA_SUMMARY': True},
-             0: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},
+            -5: {'INFO': True,  'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': True},  # noqa: E241
+            -4: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': False, 'FORCE_SUMMARY': True},  # noqa: E241
+            -3: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': False, 'SUMMARY': False},  # noqa: E241
+            -2: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # noqa: E241
+            -1: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False, 'EXTRA_SUMMARY': True},  # noqa: E241
+             0: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # noqa: E241,E131
             +1: {'INFO': False, 'SUCCESS': False, 'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},
         }
         squelch_settings = VERBOSITY_SQUELCH_MAP.get(verbosity_level, VERBOSITY_SQUELCH_MAP[0])
@@ -595,7 +598,7 @@ class GrandTotals:
     
     def display_grand_totals(self):
         """Display the grand totals summary."""
-        global verbosity_config
+        global verbosity_config  # noqa: F824
         if not dazzle_logger:
             return
             
@@ -616,7 +619,9 @@ class GrandTotals:
         
         # Update global exit code
         global verification_exit_code
-        verification_exit_code = max(verification_exit_code, exit_code)
+        # For recursive operations, the grand totals exit code should override individual directory codes
+        # This ensures the exit code reflects overall repository health, not worst individual directory
+        verification_exit_code = exit_code
         
         # Display header
         dazzle_logger.info("", level=0)  # Blank line
@@ -933,7 +938,7 @@ class ShasumManager:
 class MonolithicWriter:
     """Handles streaming writes to monolithic checksum files."""
 
-    def __init__(self, output_path: Path, root_path: Path, algorithm: str, resume_mode=False):
+    def __init__(self, output_path: Path, root_path: Path, algorithm: str, resume_mode=False, yes_to_all=False):
         self.output_path = Path(output_path)
         self.temp_path = Path(str(output_path) + '.tmp')
         self.root_path = Path(root_path)
@@ -943,6 +948,7 @@ class MonolithicWriter:
         self._is_open = False
         self._last_progress_report = 0
         self.resume_mode = resume_mode
+        self.yes_to_all = yes_to_all
 
     def __enter__(self):
         """Context manager entry."""
@@ -963,6 +969,12 @@ class MonolithicWriter:
         try:
             # Ensure output directory exists
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Check for existing file (but not in resume mode - that's handled separately)
+            if not self.resume_mode and self.output_path.exists():
+                if not self._check_overwrite_permission():
+                    print("Operation cancelled.")
+                    raise KeyboardInterrupt("User cancelled overwrite operation")
 
             if self.resume_mode and self.output_path.exists():
                 # Resume mode: copy existing file to temp and append
@@ -1054,8 +1066,8 @@ class MonolithicWriter:
                 self.file_handle = None
 
             if success and self.temp_path.exists():
-                # Atomic rename to final location
-                os.rename(self.temp_path, self.output_path)
+                # Cross-platform atomic replacement
+                self._atomic_replace(self.temp_path, self.output_path)
                 logger.info(f"Wrote {self.entries_written} checksums to monolithic file: {self.output_path}")
             else:
                 # Cleanup temp file on failure
@@ -1076,6 +1088,90 @@ class MonolithicWriter:
         except Exception as e:
             logger.warning(f"Could not remove temp file {self.temp_path}: {e}")
 
+    def _atomic_replace(self, src: Path, dst: Path):
+        """Cross-platform atomic file replacement."""
+        if is_windows():
+            # Windows: requires removing target first
+            if dst.exists():
+                backup_path = dst.with_suffix(dst.suffix + '.bak')
+                # Remove any existing backup
+                if backup_path.exists():
+                    backup_path.unlink()
+                # Move current file to backup
+                dst.rename(backup_path)
+                try:
+                    # Move temp file to final location
+                    src.rename(dst)
+                    # Remove backup on success
+                    backup_path.unlink()
+                except Exception:
+                    # Restore backup on failure
+                    if backup_path.exists():
+                        backup_path.rename(dst)
+                    raise
+            else:
+                # No existing file, simple rename
+                src.rename(dst)
+        else:
+            # Unix: atomic rename (overwrites existing file)
+            src.rename(dst)
+
+    def _check_overwrite_permission(self) -> bool:
+        """Check if user wants to overwrite existing monolithic file."""
+        # Auto-accept if --yes flag was used
+        if self.yes_to_all:
+            print(f"Overwriting existing file: {self.output_path.name}")
+            return True
+        
+        # Get file info
+        try:
+            stat_info = self.output_path.stat()
+            file_size = stat_info.st_size
+            mod_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat_info.st_mtime))
+            
+            # Count entries (quick check)
+            entry_count = 0
+            try:
+                with open(self.output_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip() and not line.startswith('#') and '  ' in line:
+                            entry_count += 1
+            except Exception:
+                entry_count = "unknown"
+            
+        except Exception:
+            file_size = 0
+            mod_time = "unknown"
+            entry_count = "unknown"
+        
+        # Show file information and prompt
+        print(f"\nFile '{self.output_path.name}' already exists:")
+        if entry_count != "unknown":
+            print(f"  Entries: {entry_count:,}")
+        if file_size > 0:
+            print(f"  Size: {self._format_size(file_size)}")
+        print(f"  Modified: {mod_time}")
+        
+        print(f"\nAlternatives:")
+        print(f"  - Use 'dazzlesum update -r .' for incremental updates")
+        print(f"  - Use 'dazzlesum create -r --output different-name.{self.algorithm}' for different filename")
+        print(f"  - Use '-y' flag to auto-overwrite in scripts")
+        
+        try:
+            response = input(f"\nOverwrite '{self.output_path.name}'? (y/N): ").strip().lower()
+            return response in ['y', 'yes']
+        except (KeyboardInterrupt, EOFError):
+            print("\nOperation cancelled.")
+            return False
+
+    def _format_size(self, bytes_count: int) -> str:
+        """Format bytes in human-readable format."""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if bytes_count < 1024:
+                return f"{bytes_count:.1f} {unit}"
+            bytes_count /= 1024
+        return f"{bytes_count:.1f} TB"
+
 
 class ProgressTracker:
     """Track progress with percentage completion and ETA."""
@@ -1085,6 +1181,7 @@ class ProgressTracker:
         self.total_files = total_files
         self.processed_dirs = 0
         self.processed_files = 0
+        self.processed_bytes = 0
         self.show_progress = show_progress
         self.start_time = time.time()
         self.last_update = 0
@@ -1095,9 +1192,10 @@ class ProgressTracker:
         self.processed_dirs += count
         self._maybe_display_progress()
 
-    def update_files(self, count=1):
+    def update_files(self, count=1, file_size=0):
         """Update file progress."""
         self.processed_files += count
+        self.processed_bytes += file_size
         self._maybe_display_progress()
 
     def _maybe_display_progress(self):
@@ -1141,13 +1239,31 @@ class ProgressTracker:
         # Create progress bar
         bar_width = 30
         filled = int(bar_width * (percentage / 100))
-        bar = '█' * filled + '░' * (bar_width - filled)
+        bar = '#' * filled + '-' * (bar_width - filled)
+
+        # Format data throughput
+        data_str = self._format_bytes(self.processed_bytes)
+        if elapsed > 0 and self.processed_bytes > 0:
+            mbps = (self.processed_bytes / (1024 * 1024)) / elapsed
+            throughput_str = f"{mbps:.1f} MB/s"
+        else:
+            throughput_str = "-- MB/s"
 
         # Print progress (overwrite previous line)
         print(f"\r[{bar}] {percentage:5.1f}% | "
               f"Dirs: {self.processed_dirs}/{self.total_dirs} | "
               f"Files: {self.processed_files}/{self.total_files} | "
+              f"{data_str} ({throughput_str}) | "
               f"ETA: {eta_str}", end='', flush=True)
+
+    @staticmethod
+    def _format_bytes(num_bytes):
+        """Format bytes in human-readable format."""
+        for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
+            if abs(num_bytes) < 1024.0:
+                return f"{num_bytes:.1f} {unit}"
+            num_bytes /= 1024.0
+        return f"{num_bytes:.1f} PB"
 
     def _format_duration(self, seconds):
         """Format duration in human-readable format."""
@@ -1290,6 +1406,10 @@ def count_dirs_and_files(root_path: Path, include_patterns, exclude_patterns,
         try:
             total_dirs += 1
 
+            # Periodic progress during counting (every 500 dirs)
+            if total_dirs % 500 == 0:
+                print(f"\r  Counting... {total_dirs:,} dirs, {total_files:,} files", end="", flush=True)
+
             # Count files in this directory
             for item in current_dir.iterdir():
                 if item.is_file():
@@ -1298,10 +1418,22 @@ def count_dirs_and_files(root_path: Path, include_patterns, exclude_patterns,
                         total_files += 1
                 elif item.is_dir() and not symlink_handler.is_visited(item):
                     if recursive:
-                        dirs_to_visit.append(item)
+                        # Skip excluded directories (same patterns used for files)
+                        dir_name = item.name
+                        skip = False
+                        for pattern in exclude_patterns:
+                            if dir_name == pattern or item.match(pattern):
+                                skip = True
+                                break
+                        if not skip:
+                            dirs_to_visit.append(item)
         except Exception:
             # Skip directories we can't access
             continue
+
+    # Clear the counting line if we printed any updates
+    if total_dirs >= 100:
+        print("\r" + " " * 60 + "\r", end="", flush=True)
 
     return total_dirs, total_files
 
@@ -1447,7 +1579,7 @@ class SymlinkHandler:
             try:
                 result = subprocess.run(
                     ['dir', '/AL', str(path.parent)],
-                    capture_output=True, text=True, shell=True
+                    capture_output=True, text=True, encoding='utf-8', errors='replace', shell=True
                 )
                 if result.returncode == 0:
                     return '<JUNCTION>' in result.stdout and path.name in result.stdout
@@ -1630,14 +1762,14 @@ class DazzleHashCalculator:
         try:
             # Special handling for fsum
             if tool == 'fsum':
-                result = subprocess.run([tool], capture_output=True, text=True, timeout=5)
+                result = subprocess.run([tool], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
                 # fsum returns usage info when called without arguments
                 return 'SlavaSoft' in result.stdout or 'fsum' in result.stdout.lower()
 
             # For other tools, try --help or --version
             for flag in ['--help', '--version', '-h']:
                 try:
-                    result = subprocess.run([tool, flag], capture_output=True, text=True, timeout=5)
+                    result = subprocess.run([tool, flag], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
                     if result.returncode == 0 or 'usage' in result.stderr.lower():
                         return True
                 except Exception:
@@ -1684,7 +1816,7 @@ class DazzleHashCalculator:
     def _calculate_with_fsum(self, file_path: Path) -> str:
         """Calculate hash using Windows fsum tool."""
         cmd = ['fsum', f'-{self.algorithm}', str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
 
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
@@ -1718,7 +1850,7 @@ class DazzleHashCalculator:
             raise ValueError(f"Unsupported algorithm for certutil: {self.algorithm}")
 
         cmd = ['certutil', '-hashfile', str(file_path), certutil_algo]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
 
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
@@ -1736,7 +1868,7 @@ class DazzleHashCalculator:
     def _calculate_with_hashsum(self, file_path: Path) -> str:
         """Calculate hash using Unix *sum tools."""
         cmd = [self.native_tool, str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
 
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
@@ -1755,7 +1887,7 @@ class DazzleHashCalculator:
             raise ValueError(f"Unsupported algorithm for shasum: {self.algorithm}")
 
         cmd = ['shasum', f'-a{shasum_algo}', str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
 
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
@@ -1931,11 +2063,20 @@ class ChecksumGenerator:
                  include_patterns=None, exclude_patterns=None, follow_symlinks=False,
                  log_file=None, summary_mode=False, generate_individual=True,
                  generate_monolithic=False, output_file=None, show_all_verifications=False,
-                 shadow_dir=None, resume_mode=False):
+                 shadow_dir=None, resume_mode=False, yes_to_all=False):
         self.algorithm = algorithm.lower()
         self.calculator = DazzleHashCalculator(algorithm, line_ending_strategy)
         self.include_patterns = include_patterns or []
         self.exclude_patterns = exclude_patterns or [SHASUM_FILENAME, STATE_FILENAME]
+        
+        # For monolithic mode, also exclude the temporary file that will be created
+        if generate_monolithic:
+            if output_file:
+                temp_filename = Path(output_file).name + '.tmp'
+            else:
+                temp_filename = f"{MONOLITHIC_DEFAULT_NAME}.{self.algorithm}.tmp"
+            self.exclude_patterns.append(temp_filename)
+        
         self.follow_symlinks = follow_symlinks
         self.log_file = log_file
         self.summary_mode = summary_mode
@@ -1944,6 +2085,7 @@ class ChecksumGenerator:
         self.output_file = output_file
         self.show_all_verifications = show_all_verifications
         self.resume_mode = resume_mode
+        self.yes_to_all = yes_to_all
         self.summary_collector = SummaryCollector()
         self.progress_tracker = None
         
@@ -2103,7 +2245,7 @@ class ChecksumGenerator:
 
                     # Update progress tracker
                     if self.progress_tracker:
-                        self.progress_tracker.update_files(1)
+                        self.progress_tracker.update_files(1, file_size)
 
                     if self.log_file:
                         logger.debug(f"Completed: {file_path} -> {hash_value}")
@@ -2207,11 +2349,8 @@ class ChecksumGenerator:
 
         # Check each stored checksum
         for filename, expected_hash in stored_checksums.items():
-            # In shadow mode, resolve relative path to source file
-            if self.shadow_resolver:
-                file_path = self.shadow_resolver.get_source_file_path(filename)
-            else:
-                file_path = directory / filename
+            # Filenames in .shasum are relative to the directory being verified
+            file_path = directory / filename
 
             if not file_path.exists():
                 results['missing'].append(filename)
@@ -2234,7 +2373,11 @@ class ChecksumGenerator:
 
                 # Update progress tracker
                 if self.progress_tracker:
-                    self.progress_tracker.update_files(1)
+                    try:
+                        fsize = file_path.stat().st_size
+                    except OSError:
+                        fsize = 0
+                    self.progress_tracker.update_files(1, fsize)
 
             except Exception as e:
                 results['failed'].append({
@@ -2325,7 +2468,11 @@ class ChecksumGenerator:
 
                 # Update progress tracker
                 if self.progress_tracker:
-                    self.progress_tracker.update_files(1)
+                    try:
+                        fsize = file_path.stat().st_size
+                    except OSError:
+                        fsize = 0
+                    self.progress_tracker.update_files(1, fsize)
 
             except Exception as e:
                 results['failed'].append({
@@ -2406,9 +2553,11 @@ class ChecksumGenerator:
         # Initialize progress tracking if summary mode
         if self.summary_mode:
             # Don't print info messages that interfere with progress bar
+            print("Scanning directory tree...", end="", flush=True)
             total_dirs, total_files = count_dirs_and_files(
                 root_directory, self.include_patterns, self.exclude_patterns, self.follow_symlinks, recursive
             )
+            print(f" found {total_dirs:,} dirs, {total_files:,} files")
             self.progress_tracker = ProgressTracker(total_dirs, total_files, True)
 
         # Set up monolithic writer if needed
@@ -2438,7 +2587,7 @@ class ChecksumGenerator:
                 ext = f".{self.algorithm}"
                 output_path = root_directory / f"{MONOLITHIC_DEFAULT_NAME}{ext}"
 
-            monolithic_writer = MonolithicWriter(output_path, root_directory, self.algorithm, self.resume_mode)
+            monolithic_writer = MonolithicWriter(output_path, root_directory, self.algorithm, self.resume_mode, self.yes_to_all)
 
         walker = FIFODirectoryWalker(self.follow_symlinks)
 
@@ -2518,9 +2667,9 @@ class ChecksumGenerator:
         if self.summary_mode:
             self.summary_collector.print_summary()
 
-    def _print_verification_results(self, path: Path, results: Dict[str, Any], show_all=False):
+    def _print_verification_results(self, path: Path, results: Dict[str, Any], show_all=False):  # noqa: C901
         """Print verification results for a directory or monolithic file."""
-        global squelch_settings, verbosity_config
+        global squelch_settings, verbosity_config  # noqa: F824
         
         # Check for silent mode first - no output at all
         if verbosity_config and verbosity_config.is_silent():
@@ -2688,7 +2837,9 @@ class ChecksumGenerator:
             # Check if this is a SUCCESS message that should be squelched
             elif 'SUCCESS' in status_text and squelch_settings.get('SUCCESS', False):
                 # This is a SUCCESS (perfect or with extras) and SUCCESS is squelched
-                should_display = False
+                # But for auto-detected commands, always show the summary
+                if not is_auto_detected_command:
+                    should_display = False
             else:
                 # Check if directory has only issues that are being squelched
                 # If all the issues in this directory are squelched, don't show status line
@@ -2696,8 +2847,9 @@ class ChecksumGenerator:
                 has_displayed_missing = missing_count > 0 and not squelch_settings.get('MISSING', False)
                 has_displayed_extra = extra_count > 0 and not squelch_settings.get('EXTRA', False)
                 
-                # If directory has no displayed issues, don't show status line
-                if not has_displayed_fails and not has_displayed_missing and not has_displayed_extra and verified_count > 0:
+                # If directory has no displayed issues, don't show status line (unless show_all is True or auto-detected)
+                # For auto-detected commands, always show the summary even for pure SUCCESS
+                if not has_displayed_fails and not has_displayed_missing and not has_displayed_extra and verified_count > 0 and not show_all and not is_auto_detected_command:
                     should_display = False
                 # Special case: if directory only has EXTRA files and EXTRA_SUMMARY is squelched, hide status line
                 elif (has_displayed_extra and not has_displayed_fails and not has_displayed_missing and 
@@ -2720,7 +2872,10 @@ class ChecksumGenerator:
         # Store exit code for main function to return
         # We'll add this to a global variable or pass it through the call stack
         global verification_exit_code
-        verification_exit_code = exit_code
+        # Only set individual directory exit code if we're not tracking grand totals
+        # If we have grand totals, they will set the final exit code
+        if not grand_totals:
+            verification_exit_code = exit_code
         
         # Add results to grand totals if tracking
         if grand_totals:
@@ -2806,7 +2961,7 @@ For complete argument list, use: dazzlesum --help
         """.format(version=__version__))
     
     def _mode_help(self):
-        print("""
+        print(r"""
 --mode OPTION: Choose checksum generation strategy
 
 OPTIONS:
@@ -2818,22 +2973,22 @@ DETAILED EXPLANATION:
 
 individual mode (default):
     Creates .shasum files in each processed directory
-    ├── dir1/
-    │   ├── file1.txt
-    │   ├── file2.txt
-    │   └── .shasum          ← checksums for file1.txt, file2.txt
-    └── dir2/
-        ├── file3.txt
-        └── .shasum          ← checksum for file3.txt
+    +---- dir1/
+    |   +---- file1.txt
+    |   +---- file2.txt
+    |   \---- .shasum          <-- checksums for file1.txt, file2.txt
+    \---- dir2/
+        +---- file3.txt
+        \---- .shasum          <-- checksum for file3.txt
 
 monolithic mode:
     Creates single checksum file with relative paths
-    ├── dir1/
-    │   ├── file1.txt
-    │   └── file2.txt
-    ├── dir2/
-    │   └── file3.txt
-    └── checksums.sha256     ← all checksums in one file
+    +---- dir1/
+    |   +---- file1.txt
+    |   \---- file2.txt
+    +---- dir2/
+    |   \---- file3.txt
+    \---- checksums.sha256     <-- all checksums in one file
     
     Content format:
     hash1  dir1/file1.txt
@@ -2856,7 +3011,7 @@ REQUIREMENTS:
         """)
     
     def _manage_help(self):
-        print("""
+        print(r"""
 --manage OPERATION: Manage existing .shasum files
 
 OPERATIONS:
@@ -2871,11 +3026,11 @@ backup operation:
     Creates parallel directory structure with only .shasum files
     Source:                    Backup:
     /data/                     /backup/
-    ├── file1.txt              ├── .shasum
-    ├── .shasum                └── subdir/
-    └── subdir/                    └── .shasum
-        ├── file2.txt
-        └── .shasum
+    +---- file1.txt              +---- .shasum
+    +---- .shasum                \---- subdir/
+    \---- subdir/                    \---- .shasum
+        +---- file2.txt
+        \---- .shasum
 
 remove operation:
     Removes all .shasum files from directory tree
@@ -2961,7 +3116,7 @@ EXAMPLES:
         """)
     
     def _shadow_help(self):
-        print("""
+        print(r"""
 --shadow-dir DIRECTORY: Keep source directories clean
 
 CONCEPT:
@@ -2972,13 +3127,13 @@ DIRECTORY STRUCTURE:
 
 Source (stays clean):        Shadow (contains checksums):
 /project/                    /checksums/
-├── src/                     ├── .shasum
-│   ├── main.py              ├── checksums.sha256      (if monolithic)
-│   └── utils.py             ├── src/
-├── docs/                    │   └── .shasum
-│   └── readme.md            └── docs/
-└── tests/                       └── .shasum
-    └── test_main.py
++---- src/                     +---- .shasum
+|   +---- main.py              +---- checksums.sha256      (if monolithic)
+|   \---- utils.py             +---- src/
++---- docs/                    |   \---- .shasum
+|   \---- readme.md            \---- docs/
+\---- tests/                       \---- .shasum
+    \---- test_main.py
 
 BENEFITS:
     - Source directories remain completely clean
@@ -3381,7 +3536,11 @@ For comprehensive examples: %(prog)s examples
                               help='Hide output categories: SUCCESS,NO_SHASUM,INFO,EXTRA,MISSING,FAILS,SUMMARY,EXTRA_SUMMARY (comma-separated)')
     verify_parser.add_argument('--show-all', action='store_true',
                               help='Show all results including successful verifications (legacy behavior)')
-    
+    verify_parser.add_argument('--include', action='append', metavar='PATTERN',
+                              help='Include files matching pattern (can be used multiple times)')
+    verify_parser.add_argument('--exclude', action='append', metavar='PATTERN',
+                              help='Exclude files/directories matching pattern (can be used multiple times)')
+
     # UPDATE subcommand
     update_parser = subparsers.add_parser('update', parents=[parent],
                                          help='Update existing checksums',
@@ -3491,7 +3650,7 @@ def show_detailed_help(topic):
 
 def get_mode_help():
     """Get detailed help for --mode parameter."""
-    return """--mode OPTION: Choose checksum generation strategy
+    return r"""--mode OPTION: Choose checksum generation strategy
 
 OPTIONS:
     individual   Generate .shasum files in each directory (default)
@@ -3502,22 +3661,22 @@ DETAILED EXPLANATION:
 
 individual mode (default):
     Creates .shasum files in each processed directory
-    ├── dir1/
-    │   ├── file1.txt
-    │   ├── file2.txt
-    │   └── .shasum          ← checksums for file1.txt, file2.txt
-    └── dir2/
-        ├── file3.txt
-        └── .shasum          ← checksum for file3.txt
+    +---- dir1/
+    |   +---- file1.txt
+    |   +---- file2.txt
+    |   \---- .shasum          <-- checksums for file1.txt, file2.txt
+    \---- dir2/
+        +---- file3.txt
+        \---- .shasum          <-- checksum for file3.txt
 
 monolithic mode:
     Creates single checksum file with relative paths
-    ├── dir1/
-    │   ├── file1.txt
-    │   └── file2.txt
-    ├── dir2/
-    │   └── file3.txt
-    └── checksums.sha256     ← all checksums in one file
+    +---- dir1/
+    |   +---- file1.txt
+    |   \---- file2.txt
+    +---- dir2/
+    |   \---- file3.txt
+    \---- checksums.sha256     <-- all checksums in one file
     
     Content format:
     hash1  dir1/file1.txt
@@ -3604,7 +3763,7 @@ MIGRATION FROM OLD SYNTAX:
 
 def get_shadow_help():
     """Get detailed help for shadow directories."""
-    return """SHADOW DIRECTORIES: Keep Source Clean
+    return r"""SHADOW DIRECTORIES: Keep Source Clean
 
 CONCEPT:
     Shadow directories store all checksum files in a parallel directory
@@ -3613,12 +3772,12 @@ CONCEPT:
 STRUCTURE:
     Source Directory (Clean)          Shadow Directory (Checksums)
     /data/                           /checksums/
-    ├── file1.txt                    ├── .shasum                    
-    ├── file2.txt                    ├── checksums.sha256          
-    ├── folder1/                     ├── folder1/                   
-    │   └── file3.txt                │   └── .shasum               
-    └── folder2/                     └── folder2/                   
-        └── file4.txt                    └── .shasum               
+    +---- file1.txt                    +---- .shasum                    
+    +---- file2.txt                    +---- checksums.sha256          
+    +---- folder1/                     +---- folder1/                   
+    |   \---- file3.txt                |   \---- .shasum               
+    \---- folder2/                     \---- folder2/                   
+        \---- file4.txt                    \---- .shasum               
 
 EXAMPLES:
     dazzlesum create -r --shadow-dir ./checksums       # Generate to shadow
@@ -3636,175 +3795,6 @@ CLONE VERIFICATION:
     cp -r ./original ./clone
     dazzlesum verify -r --shadow-dir ./checksums ./clone"""
 
-def handle_deprecated_syntax(argv):
-    """Handle deprecated --verify and --update flags with helpful messages."""
-    logger.warning("DEPRECATION WARNING: --verify and --update flags are deprecated")
-    logger.warning("Please use the new subcommand syntax:")
-    
-    if '--verify' in argv:
-        logger.warning("  Old: dazzlesum --verify [options]")
-        logger.warning("  New: dazzlesum verify [options]")
-        argv.remove('--verify')
-        argv.insert(1, 'verify')
-    elif '--update' in argv:
-        logger.warning("  Old: dazzlesum --update [options]")
-        logger.warning("  New: dazzlesum update [options]")
-        argv.remove('--update')
-        argv.insert(1, 'update')
-    
-    logger.warning("This compatibility mode will be removed in version 3.0")
-    logger.warning("Use 'dazzlesum examples' to see updated usage patterns")
-
-def dispatch_command(args):
-    """Dispatch to appropriate command handler."""
-    if args.command == 'create':
-        return handle_create_command(args)
-    elif args.command == 'verify':
-        return handle_verify_command(args)
-    elif args.command == 'update':
-        return handle_update_command(args)
-    elif args.command == 'manage':
-        return handle_manage_command(args)
-    else:
-        logger.error(f"Unknown command: {args.command}")
-        return 1
-
-def handle_create_command(args):
-    """Handle create subcommand."""
-    # Determine generation modes based on --mode
-    generate_individual = (args.mode in ['individual', 'both'])
-    generate_monolithic = (args.mode in ['monolithic', 'both'])
-    
-    # Set up generator for create mode
-    generator = ChecksumGenerator(
-        algorithm=args.algorithm,
-        line_ending_strategy=args.line_endings,
-        include_patterns=getattr(args, 'include', None) or [],
-        exclude_patterns=getattr(args, 'exclude', None) or [],
-        follow_symlinks=args.follow_symlinks,
-        log_file=getattr(args, 'log', None),
-        summary_mode=getattr(args, 'summary', False),
-        generate_individual=generate_individual,
-        generate_monolithic=generate_monolithic,
-        output_file=getattr(args, 'output', None),
-        shadow_dir=args.shadow_dir,
-        resume_mode=getattr(args, 'resume', False)
-    )
-    
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        if not getattr(args, 'summary', False):
-            logger.info("Forcing Python implementation")
-    
-    # Log generation mode
-    mode_descriptions = {
-        'individual': 'Individual .shasum files per directory',
-        'monolithic': 'Single monolithic checksum file',
-        'both': 'Both individual and monolithic files'
-    }
-    dazzle_logger.info(f"Mode: {mode_descriptions[args.mode]}", level=1)
-    
-    # Process directory tree
-    directory = Path(args.directory).resolve()
-    generator.process_directory_tree(directory, recursive=args.recursive)
-    return 0
-
-def handle_verify_command(args):
-    """Handle verify subcommand."""
-    # Auto-detect verification mode if no checksum file specified
-    output_file = getattr(args, 'checksum_file', None)
-    if not output_file:
-        # Use context detection to find appropriate checksum file
-        directory = Path(args.directory).resolve()
-        detected_file = auto_detect_checksum_file(directory)
-        if detected_file and is_monolithic_file(detected_file):
-            output_file = str(detected_file)
-            if dazzle_logger:
-                dazzle_logger.info(f"Auto-detected monolithic checksum file: {detected_file}", level=1)
-            else:
-                logger.info(f"Auto-detected monolithic checksum file: {detected_file}")
-    
-    # Set up generator for verify mode
-    generator = ChecksumGenerator(
-        algorithm=args.algorithm,
-        line_ending_strategy=args.line_endings,
-        follow_symlinks=args.follow_symlinks,
-        log_file=getattr(args, 'log', None),
-        summary_mode=False,  # Verify mode doesn't use summary
-        generate_individual=True,  # Verify needs to read individual files
-        generate_monolithic=bool(output_file),
-        output_file=output_file,
-        show_all_verifications=getattr(args, 'show_all_verifications', False),
-        shadow_dir=args.shadow_dir
-    )
-    
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        logger.info("Forcing Python implementation")
-    
-    # Process directory tree in verify mode
-    directory = Path(args.directory).resolve()
-    generator.process_directory_tree(directory, recursive=args.recursive, verify_only=True)
-    return 0
-
-def handle_update_command(args):
-    """Handle update subcommand."""
-    # Set up generator for update mode
-    generator = ChecksumGenerator(
-        algorithm=args.algorithm,
-        line_ending_strategy=args.line_endings,
-        include_patterns=getattr(args, 'include', None) or [],
-        exclude_patterns=getattr(args, 'exclude', None) or [],
-        follow_symlinks=args.follow_symlinks,
-        log_file=getattr(args, 'log', None),
-        summary_mode=False,
-        generate_individual=True,  # Update implies individual files
-        generate_monolithic=False,  # Update typically doesn't use monolithic
-        shadow_dir=args.shadow_dir
-    )
-    
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        logger.info("Forcing Python implementation")
-    
-    # Process directory tree in update mode
-    directory = Path(args.directory).resolve()
-    generator.process_directory_tree(directory, recursive=args.recursive, update_mode=True)
-    return 0
-
-def handle_manage_command(args):
-    """Handle manage subcommand."""
-    # Preserve existing manage functionality
-    manager = ShasumManager(
-        root_dir=Path(args.directory),
-        backup_dir=Path(args.backup_dir) if getattr(args, 'backup_dir', None) else None,
-        dry_run=getattr(args, 'dry_run', False)
-    )
-    
-    if args.operation == 'backup':
-        if not getattr(args, 'backup_dir', None):
-            logger.error("--backup-dir is required for backup operation")
-            return 1
-        results = manager.backup_shasums()
-        return 1 if results.get('errors') else 0
-    elif args.operation == 'remove':
-        results = manager.remove_shasums(force=args.yes)
-        return 1 if results.get('errors') else 0
-    elif args.operation == 'restore':
-        if not getattr(args, 'backup_dir', None):
-            logger.error("--backup-dir is required for restore operation")
-            return 1
-        results = manager.restore_shasums()
-        return 1 if results.get('errors') else 0
-    elif args.operation == 'list':
-        results = manager.list_shasums()
-        # list_shasums returns a list, not a dict with errors
-        return 0
-    
-    return 1
 
 def execute_main_action(args, action):
     """Execute the main action based on arguments and detected command."""
@@ -3838,7 +3828,8 @@ def execute_create_action(args, directory):
         generate_monolithic=generate_monolithic,
         output_file=args.output,
         shadow_dir=args.shadow_dir,
-        resume_mode=args.resume
+        resume_mode=args.resume,
+        yes_to_all=args.yes
     )
     
     # Force Python implementation if requested
@@ -3877,14 +3868,17 @@ def execute_verify_action(args, directory):
     generator = ChecksumGenerator(
         algorithm=args.algorithm,
         line_ending_strategy=args.line_endings,
+        include_patterns=getattr(args, 'include', None) or [],
+        exclude_patterns=getattr(args, 'exclude', None) or [],
         follow_symlinks=args.follow_symlinks,
         log_file=getattr(args, 'log', None),
         summary_mode=False,  # Verify mode doesn't use summary
         generate_individual=True,  # Verify needs to read individual files
         generate_monolithic=bool(output_file),
         output_file=output_file,
-        show_all_verifications=getattr(args, 'show_all_verifications', False),
-        shadow_dir=args.shadow_dir
+        show_all_verifications=getattr(args, 'show_all_verifications', False) or getattr(args, 'show_all', False),
+        shadow_dir=args.shadow_dir,
+        yes_to_all=args.yes
     )
     
     # Force Python implementation if requested
@@ -3894,13 +3888,19 @@ def execute_verify_action(args, directory):
     
     # Squelch settings are initialized by the verbosity system
     # Apply any explicit --squelch overrides on top of verbosity-based settings
-    global squelch_settings
+    global squelch_settings  # noqa: F824
+    
+    # If --show-all is used WITHOUT explicit --squelch, override SUCCESS squelching
+    if getattr(args, 'show_all', False) and not (hasattr(args, 'squelch') and args.squelch):
+        if squelch_settings:
+            squelch_settings['SUCCESS'] = False  # Show SUCCESS messages with --show-all
+    
+    # Apply explicit --squelch overrides (these take precedence over --show-all)
     if hasattr(args, 'squelch') and args.squelch and squelch_settings:
         squelch_categories = [cat.strip().upper() for cat in args.squelch.split(',')]
         for category in squelch_categories:
             if category in squelch_settings:
                 squelch_settings[category] = True
-    
     
     # Process directory tree in verify mode
     generator.process_directory_tree(directory, recursive=args.recursive, verify_only=True)
@@ -3919,7 +3919,8 @@ def execute_update_action(args, directory):
         summary_mode=False,
         generate_individual=True,  # Update implies individual files
         generate_monolithic=False,  # Update typically doesn't use monolithic
-        shadow_dir=args.shadow_dir
+        shadow_dir=args.shadow_dir,
+        yes_to_all=args.yes
     )
     
     # Force Python implementation if requested
@@ -4053,8 +4054,8 @@ def auto_detect_checksum_file(directory_path):
             if file_path.is_file():
                 name = file_path.name.lower()
                 # Check files with common checksum extensions
-                if (name.endswith(('.sha256', '.sha1', '.sha512', '.md5')) or 
-                    'checksum' in name or 'hash' in name):
+                if (name.endswith(('.sha256', '.sha1', '.sha512', '.md5')) or
+                        'checksum' in name or 'hash' in name):
                     if is_monolithic_file(file_path):
                         return file_path
                         
@@ -4160,6 +4161,7 @@ def format_status_with_colors(status_text, success_percentage, failure_percentag
 
 def main():
     """Main entry point with subcommand handling and context detection."""
+    global is_auto_detected_command
     try:
         parser = create_argument_parser()
         
@@ -4181,11 +4183,13 @@ def main():
                 detected_command = detect_context_command(first_arg)
                 sys.argv.insert(1, detected_command)
                 logger.info(f"Context-aware: executing '{detected_command} {first_arg}'")
+                is_auto_detected_command = True
         elif len(sys.argv) == 1:
             # No arguments at all, detect command for current directory
             detected_command = detect_context_command('.')
             sys.argv.extend([detected_command, '.'])
             logger.info(f"Context-aware: executing '{detected_command} .'")
+            is_auto_detected_command = True
             if detected_command == 'verify':
                 # Smart default: only show all verifications for small datasets
                 # For large monolithic files, use compact format
@@ -4253,8 +4257,41 @@ def main():
             
             # Validate mode requirements
             if args.mode in ['monolithic', 'both'] and not args.recursive:
-                logger.error("Monolithic modes require --recursive flag")
-                return 1
+                print(f"Monolithic mode works by creating a single checksum file for the entire directory tree.")
+                print(f"This requires recursive processing of subdirectories.")
+                print(f"")
+                # Filter out problematic arguments for suggestions
+                filtered_args = [arg for arg in sys.argv[2:] if arg not in ['--mode', 'monolithic']]
+                # Remove any --mode argument and its value
+                clean_args = []
+                skip_next = False
+                for arg in filtered_args:
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if arg == '--mode':
+                        skip_next = True
+                        continue
+                    clean_args.append(arg)
+                
+                args_str = ' '.join(clean_args)
+                print(f"If you want to create individual .shasum files per directory instead:")
+                print(f"  dazzlesum create {args_str} --mode individual")
+                print(f"")
+                print(f"If you want a custom-named checksum file for just this directory:")
+                print(f"  dazzlesum create {args_str} --output custom-name.sha256")
+                print(f"")
+                try:
+                    response = input("Do you want to proceed with recursive monolithic mode? (y/N): ").strip().lower()
+                    if response in ['y', 'yes']:
+                        args.recursive = True
+                        print("Proceeding with recursive monolithic mode...")
+                    else:
+                        print("Operation cancelled. Use --help for more options.")
+                        return 0
+                except (KeyboardInterrupt, EOFError):
+                    print("\nOperation cancelled.")
+                    return 0
         
         # Set up logging and global state
         # Only pass show_log_types if explicitly set, otherwise let verbosity config decide
@@ -4311,7 +4348,7 @@ def main():
             if hasattr(locals().get('args'), 'verbose') and args.verbose >= 3:
                 import traceback
                 logger.debug(traceback.format_exc())
-        except:
+        except Exception:
             # Fallback for debugging
             import traceback
             logger.debug(traceback.format_exc())

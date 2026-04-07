@@ -11,7 +11,7 @@ Dazzlesum generates `.shasum` files that are compatible with standard checksum t
 Each directory gets its own `.shasum` file containing checksums for files in that directory only.
 
 ```
-# Dazzle checksum tool v1.1.0 - sha256 - 2025-06-27T09:00:00Z
+# Dazzle checksum tool v1.3.6 - sha256 - 2025-06-29T09:00:00Z
 abc123def456789012345678901234567890123456789012345678901234567890  file1.txt
 789012fed345678901234567890123456789012345678901234567890123456789  file2.doc
 fed456abc789012345678901234567890123456789012345678901234567890123  script.py
@@ -23,7 +23,7 @@ fed456abc789012345678901234567890123456789012345678901234567890123  script.py
 A single file containing checksums for an entire directory tree with relative paths.
 
 ```
-# Dazzle monolithic checksum file v1.1.0 - sha256 - 2025-06-27T09:00:00Z
+# Dazzle monolithic checksum file v1.3.6 - sha256 - 2025-06-29T09:00:00Z
 # Root directory: /path/to/project
 abc123def456789012345678901234567890123456789012345678901234567890  folder1/file1.txt
 789012fed345678901234567890123456789012345678901234567890123456789  folder1/file2.doc

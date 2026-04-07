@@ -108,8 +108,8 @@ def test_comparison_with_level_5():
         
         all_output_5 = stdout_5 + stderr_5
         all_output_4 = stdout_4 + stderr_4
-        level_5_status_count = len([l for l in all_output_5.split('\n') if ': ' in l and 'verified' in l])
-        level_4_status_count = len([l for l in all_output_4.split('\n') if ': ' in l and 'verified' in l])
+        level_5_status_count = len([line for line in all_output_5.split('\n') if ': ' in line and 'verified' in line])
+        level_4_status_count = len([line for line in all_output_4.split('\n') if ': ' in line and 'verified' in line])
         
         print(f"Level -5 status lines: {level_5_status_count}")
         print(f"Level -4 status lines: {level_4_status_count}")
