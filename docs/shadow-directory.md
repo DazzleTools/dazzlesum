@@ -1,6 +1,6 @@
 # Shadow Directory Guide
 
-Shadow directories provide a powerful way to keep your source directories clean while maintaining comprehensive checksum verification. Instead of placing `.shasum` files directly in your source directories, shadow directories store them in a parallel directory structure.
+Shadow directories provide a powerful way to keep your source directories clean while maintaining accurate checksum verification. Instead of placing `.shasum` files directly in your source directories, shadow directories store them in a parallel directory structure.
 
 ## Overview
 
@@ -368,4 +368,4 @@ Shadow directories provide a clean, organized approach to checksum management wi
 - **Better Organization**: Separate data from metadata
 - **Workflow Integration**: Easy integration with backup, distribution, and development workflows
 
-Use shadow directories when you need comprehensive checksum verification without the overhead of checksum files scattered throughout your directory structure.
+Use shadow directories when you need recursive folder checksum verification without the overhead of checksum files scattered throughout your directory structure.
