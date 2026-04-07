@@ -13,28 +13,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Future changes will be listed here
 
-## [1.3.5] - 2025-06-29
+## [1.3.6] - 2026-04-07
 
 ### Added
-- Branch-aware git hook validation with strict mode for main branch
-- Better development workflow with tiered quality gates
-- Test suite validation (all 77 unit tests now passing)
+- verify command now supports --include/--exclude flags (parity with create command)
+- Progress reporting during directory counting stage (updates every 100 dirs for large trees)
+- "Scanning directory tree..." status with final dir/file count summary
+- Throughput metric (files/sec) in grand totals processing summary
 
-### Changed
-- Exit code logic now uses aggregate results for recursive operations instead of individual directory codes
-- Enhanced CI/CD alignment between local pre-push hooks and GitHub Actions
-- Improved test infrastructure reliability and error reporting
+### Fixed
+- Directory counting stage now respects --exclude patterns (excluded dirs were inflating progress totals)
+- Fixed shadow-dir verify resolving filenames against source root instead of current directory (100% false "missing" failures)
+- Replaced Unicode box-drawing and progress bar characters with ASCII equivalents for Windows codepage compatibility
+- Removed stale .repokit.json and root-level install-hooks.sh (replaced by scripts/install-hooks.sh)
+
+## [1.3.5] - 2025-06-29
 
 ### Fixed
 - Fixed exit code calculation bug where individual directory codes overrode aggregate results
 - Resolved flake8 complexity warnings in verification result printing (_print_verification_results method)
 - Fixed CI/CD alignment issues between local lint checks and GitHub Actions (added --count flag)
+- Fixed Unicode encoding issue in setup.py for Windows installations (explicit UTF-8 encoding)
 - Corrected test assertions for aggregate-based exit code behavior in test_squelch_and_grand_totals.py
 - Fixed pre-push hook to use same test runner as CI/CD pipeline
 
 ### Technical
 - Exit code determination now based on aggregate verification results across all directories
-- Pre-push hooks with tiered validation: strict mode for main branch, standard for others
+- Pre-push hooks enhanced with tiered validation: strict mode for main branch, standard for others
 - Local lint checks now match CI behavior with --count flag for consistent error reporting
 - All unit tests pass in both local and CI environments with proper aggregate exit code logic
 
@@ -174,9 +179,10 @@ Potential cloud backup integration for checksum files (under consideration).
 
 ### From 1.3.4 to 1.3.5
 - No breaking changes
-- Enhanced exit code system with 7 different codes based on aggregate results
-- Improved CI/CD alignment between local and GitHub Actions
-- All 77 unit tests now passing
+- Fixed exit code calculation to use aggregate results instead of individual directory codes
+- Improved CI/CD alignment between local pre-push hooks and GitHub Actions
+- Fixed Unicode encoding issues for Windows pip installations
+- All 77 unit tests now passing with corrected exit code logic
 
 ### From 1.3.3 to 1.3.4
 - No breaking changes

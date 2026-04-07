@@ -1,6 +1,6 @@
 # Command Reference
 
-This document provides an overview for all dazzlesum commands and options (v1.3.5+).
+This document provides an overview for all dazzlesum commands and options (v1.3.6+).
 
 ## Command Structure
 

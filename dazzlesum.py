@@ -46,10 +46,10 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
 # Version information
 # Base semantic version (manually maintained for git hooks)
-MAJOR, MINOR, PATCH = 1, 3, 5
+MAJOR, MINOR, PATCH = 1, 3, 6
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.3.5_59-20250629-7d1b7475"
+__version__ = "1.3.6_60-20250629-06b53284"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""
@@ -1181,6 +1181,7 @@ class ProgressTracker:
         self.total_files = total_files
         self.processed_dirs = 0
         self.processed_files = 0
+        self.processed_bytes = 0
         self.show_progress = show_progress
         self.start_time = time.time()
         self.last_update = 0
@@ -1191,9 +1192,10 @@ class ProgressTracker:
         self.processed_dirs += count
         self._maybe_display_progress()
 
-    def update_files(self, count=1):
+    def update_files(self, count=1, file_size=0):
         """Update file progress."""
         self.processed_files += count
+        self.processed_bytes += file_size
         self._maybe_display_progress()
 
     def _maybe_display_progress(self):
@@ -1237,13 +1239,31 @@ class ProgressTracker:
         # Create progress bar
         bar_width = 30
         filled = int(bar_width * (percentage / 100))
-        bar = '█' * filled + '░' * (bar_width - filled)
+        bar = '#' * filled + '-' * (bar_width - filled)
+
+        # Format data throughput
+        data_str = self._format_bytes(self.processed_bytes)
+        if elapsed > 0 and self.processed_bytes > 0:
+            mbps = (self.processed_bytes / (1024 * 1024)) / elapsed
+            throughput_str = f"{mbps:.1f} MB/s"
+        else:
+            throughput_str = "-- MB/s"
 
         # Print progress (overwrite previous line)
         print(f"\r[{bar}] {percentage:5.1f}% | "
               f"Dirs: {self.processed_dirs}/{self.total_dirs} | "
               f"Files: {self.processed_files}/{self.total_files} | "
+              f"{data_str} ({throughput_str}) | "
               f"ETA: {eta_str}", end='', flush=True)
+
+    @staticmethod
+    def _format_bytes(num_bytes):
+        """Format bytes in human-readable format."""
+        for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
+            if abs(num_bytes) < 1024.0:
+                return f"{num_bytes:.1f} {unit}"
+            num_bytes /= 1024.0
+        return f"{num_bytes:.1f} PB"
 
     def _format_duration(self, seconds):
         """Format duration in human-readable format."""
@@ -1386,6 +1406,10 @@ def count_dirs_and_files(root_path: Path, include_patterns, exclude_patterns,
         try:
             total_dirs += 1
 
+            # Periodic progress during counting (every 500 dirs)
+            if total_dirs % 500 == 0:
+                print(f"\r  Counting... {total_dirs:,} dirs, {total_files:,} files", end="", flush=True)
+
             # Count files in this directory
             for item in current_dir.iterdir():
                 if item.is_file():
@@ -1394,10 +1418,22 @@ def count_dirs_and_files(root_path: Path, include_patterns, exclude_patterns,
                         total_files += 1
                 elif item.is_dir() and not symlink_handler.is_visited(item):
                     if recursive:
-                        dirs_to_visit.append(item)
+                        # Skip excluded directories (same patterns used for files)
+                        dir_name = item.name
+                        skip = False
+                        for pattern in exclude_patterns:
+                            if dir_name == pattern or item.match(pattern):
+                                skip = True
+                                break
+                        if not skip:
+                            dirs_to_visit.append(item)
         except Exception:
             # Skip directories we can't access
             continue
+
+    # Clear the counting line if we printed any updates
+    if total_dirs >= 100:
+        print("\r" + " " * 60 + "\r", end="", flush=True)
 
     return total_dirs, total_files
 
@@ -1543,7 +1579,7 @@ class SymlinkHandler:
             try:
                 result = subprocess.run(
                     ['dir', '/AL', str(path.parent)],
-                    capture_output=True, text=True, shell=True
+                    capture_output=True, text=True, encoding='utf-8', errors='replace', shell=True
                 )
                 if result.returncode == 0:
                     return '<JUNCTION>' in result.stdout and path.name in result.stdout
@@ -1726,14 +1762,14 @@ class DazzleHashCalculator:
         try:
             # Special handling for fsum
             if tool == 'fsum':
-                result = subprocess.run([tool], capture_output=True, text=True, timeout=5)
+                result = subprocess.run([tool], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
                 # fsum returns usage info when called without arguments
                 return 'SlavaSoft' in result.stdout or 'fsum' in result.stdout.lower()
 
             # For other tools, try --help or --version
             for flag in ['--help', '--version', '-h']:
                 try:
-                    result = subprocess.run([tool, flag], capture_output=True, text=True, timeout=5)
+                    result = subprocess.run([tool, flag], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
                     if result.returncode == 0 or 'usage' in result.stderr.lower():
                         return True
                 except Exception:
@@ -1780,7 +1816,7 @@ class DazzleHashCalculator:
     def _calculate_with_fsum(self, file_path: Path) -> str:
         """Calculate hash using Windows fsum tool."""
         cmd = ['fsum', f'-{self.algorithm}', str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
 
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
@@ -1814,7 +1850,7 @@ class DazzleHashCalculator:
             raise ValueError(f"Unsupported algorithm for certutil: {self.algorithm}")
 
         cmd = ['certutil', '-hashfile', str(file_path), certutil_algo]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
 
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
@@ -1832,7 +1868,7 @@ class DazzleHashCalculator:
     def _calculate_with_hashsum(self, file_path: Path) -> str:
         """Calculate hash using Unix *sum tools."""
         cmd = [self.native_tool, str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
 
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
@@ -1851,7 +1887,7 @@ class DazzleHashCalculator:
             raise ValueError(f"Unsupported algorithm for shasum: {self.algorithm}")
 
         cmd = ['shasum', f'-a{shasum_algo}', str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
 
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
@@ -2209,7 +2245,7 @@ class ChecksumGenerator:
 
                     # Update progress tracker
                     if self.progress_tracker:
-                        self.progress_tracker.update_files(1)
+                        self.progress_tracker.update_files(1, file_size)
 
                     if self.log_file:
                         logger.debug(f"Completed: {file_path} -> {hash_value}")
@@ -2313,11 +2349,8 @@ class ChecksumGenerator:
 
         # Check each stored checksum
         for filename, expected_hash in stored_checksums.items():
-            # In shadow mode, resolve relative path to source file
-            if self.shadow_resolver:
-                file_path = self.shadow_resolver.get_source_file_path(filename)
-            else:
-                file_path = directory / filename
+            # Filenames in .shasum are relative to the directory being verified
+            file_path = directory / filename
 
             if not file_path.exists():
                 results['missing'].append(filename)
@@ -2340,7 +2373,11 @@ class ChecksumGenerator:
 
                 # Update progress tracker
                 if self.progress_tracker:
-                    self.progress_tracker.update_files(1)
+                    try:
+                        fsize = file_path.stat().st_size
+                    except OSError:
+                        fsize = 0
+                    self.progress_tracker.update_files(1, fsize)
 
             except Exception as e:
                 results['failed'].append({
@@ -2431,7 +2468,11 @@ class ChecksumGenerator:
 
                 # Update progress tracker
                 if self.progress_tracker:
-                    self.progress_tracker.update_files(1)
+                    try:
+                        fsize = file_path.stat().st_size
+                    except OSError:
+                        fsize = 0
+                    self.progress_tracker.update_files(1, fsize)
 
             except Exception as e:
                 results['failed'].append({
@@ -2512,9 +2553,11 @@ class ChecksumGenerator:
         # Initialize progress tracking if summary mode
         if self.summary_mode:
             # Don't print info messages that interfere with progress bar
+            print("Scanning directory tree...", end="", flush=True)
             total_dirs, total_files = count_dirs_and_files(
                 root_directory, self.include_patterns, self.exclude_patterns, self.follow_symlinks, recursive
             )
+            print(f" found {total_dirs:,} dirs, {total_files:,} files")
             self.progress_tracker = ProgressTracker(total_dirs, total_files, True)
 
         # Set up monolithic writer if needed
@@ -2918,7 +2961,7 @@ For complete argument list, use: dazzlesum --help
         """.format(version=__version__))
     
     def _mode_help(self):
-        print("""
+        print(r"""
 --mode OPTION: Choose checksum generation strategy
 
 OPTIONS:
@@ -2930,22 +2973,22 @@ DETAILED EXPLANATION:
 
 individual mode (default):
     Creates .shasum files in each processed directory
-    ├── dir1/
-    │   ├── file1.txt
-    │   ├── file2.txt
-    │   └── .shasum          ← checksums for file1.txt, file2.txt
-    └── dir2/
-        ├── file3.txt
-        └── .shasum          ← checksum for file3.txt
+    +---- dir1/
+    |   +---- file1.txt
+    |   +---- file2.txt
+    |   \---- .shasum          <-- checksums for file1.txt, file2.txt
+    \---- dir2/
+        +---- file3.txt
+        \---- .shasum          <-- checksum for file3.txt
 
 monolithic mode:
     Creates single checksum file with relative paths
-    ├── dir1/
-    │   ├── file1.txt
-    │   └── file2.txt
-    ├── dir2/
-    │   └── file3.txt
-    └── checksums.sha256     ← all checksums in one file
+    +---- dir1/
+    |   +---- file1.txt
+    |   \---- file2.txt
+    +---- dir2/
+    |   \---- file3.txt
+    \---- checksums.sha256     <-- all checksums in one file
     
     Content format:
     hash1  dir1/file1.txt
@@ -2968,7 +3011,7 @@ REQUIREMENTS:
         """)
     
     def _manage_help(self):
-        print("""
+        print(r"""
 --manage OPERATION: Manage existing .shasum files
 
 OPERATIONS:
@@ -2983,11 +3026,11 @@ backup operation:
     Creates parallel directory structure with only .shasum files
     Source:                    Backup:
     /data/                     /backup/
-    ├── file1.txt              ├── .shasum
-    ├── .shasum                └── subdir/
-    └── subdir/                    └── .shasum
-        ├── file2.txt
-        └── .shasum
+    +---- file1.txt              +---- .shasum
+    +---- .shasum                \---- subdir/
+    \---- subdir/                    \---- .shasum
+        +---- file2.txt
+        \---- .shasum
 
 remove operation:
     Removes all .shasum files from directory tree
@@ -3073,7 +3116,7 @@ EXAMPLES:
         """)
     
     def _shadow_help(self):
-        print("""
+        print(r"""
 --shadow-dir DIRECTORY: Keep source directories clean
 
 CONCEPT:
@@ -3084,13 +3127,13 @@ DIRECTORY STRUCTURE:
 
 Source (stays clean):        Shadow (contains checksums):
 /project/                    /checksums/
-├── src/                     ├── .shasum
-│   ├── main.py              ├── checksums.sha256      (if monolithic)
-│   └── utils.py             ├── src/
-├── docs/                    │   └── .shasum
-│   └── readme.md            └── docs/
-└── tests/                       └── .shasum
-    └── test_main.py
++---- src/                     +---- .shasum
+|   +---- main.py              +---- checksums.sha256      (if monolithic)
+|   \---- utils.py             +---- src/
++---- docs/                    |   \---- .shasum
+|   \---- readme.md            \---- docs/
+\---- tests/                       \---- .shasum
+    \---- test_main.py
 
 BENEFITS:
     - Source directories remain completely clean
@@ -3493,7 +3536,11 @@ For comprehensive examples: %(prog)s examples
                               help='Hide output categories: SUCCESS,NO_SHASUM,INFO,EXTRA,MISSING,FAILS,SUMMARY,EXTRA_SUMMARY (comma-separated)')
     verify_parser.add_argument('--show-all', action='store_true',
                               help='Show all results including successful verifications (legacy behavior)')
-    
+    verify_parser.add_argument('--include', action='append', metavar='PATTERN',
+                              help='Include files matching pattern (can be used multiple times)')
+    verify_parser.add_argument('--exclude', action='append', metavar='PATTERN',
+                              help='Exclude files/directories matching pattern (can be used multiple times)')
+
     # UPDATE subcommand
     update_parser = subparsers.add_parser('update', parents=[parent],
                                          help='Update existing checksums',
@@ -3603,7 +3650,7 @@ def show_detailed_help(topic):
 
 def get_mode_help():
     """Get detailed help for --mode parameter."""
-    return """--mode OPTION: Choose checksum generation strategy
+    return r"""--mode OPTION: Choose checksum generation strategy
 
 OPTIONS:
     individual   Generate .shasum files in each directory (default)
@@ -3614,22 +3661,22 @@ DETAILED EXPLANATION:
 
 individual mode (default):
     Creates .shasum files in each processed directory
-    ├── dir1/
-    │   ├── file1.txt
-    │   ├── file2.txt
-    │   └── .shasum          ← checksums for file1.txt, file2.txt
-    └── dir2/
-        ├── file3.txt
-        └── .shasum          ← checksum for file3.txt
+    +---- dir1/
+    |   +---- file1.txt
+    |   +---- file2.txt
+    |   \---- .shasum          <-- checksums for file1.txt, file2.txt
+    \---- dir2/
+        +---- file3.txt
+        \---- .shasum          <-- checksum for file3.txt
 
 monolithic mode:
     Creates single checksum file with relative paths
-    ├── dir1/
-    │   ├── file1.txt
-    │   └── file2.txt
-    ├── dir2/
-    │   └── file3.txt
-    └── checksums.sha256     ← all checksums in one file
+    +---- dir1/
+    |   +---- file1.txt
+    |   \---- file2.txt
+    +---- dir2/
+    |   \---- file3.txt
+    \---- checksums.sha256     <-- all checksums in one file
     
     Content format:
     hash1  dir1/file1.txt
@@ -3716,7 +3763,7 @@ MIGRATION FROM OLD SYNTAX:
 
 def get_shadow_help():
     """Get detailed help for shadow directories."""
-    return """SHADOW DIRECTORIES: Keep Source Clean
+    return r"""SHADOW DIRECTORIES: Keep Source Clean
 
 CONCEPT:
     Shadow directories store all checksum files in a parallel directory
@@ -3725,12 +3772,12 @@ CONCEPT:
 STRUCTURE:
     Source Directory (Clean)          Shadow Directory (Checksums)
     /data/                           /checksums/
-    ├── file1.txt                    ├── .shasum                    
-    ├── file2.txt                    ├── checksums.sha256          
-    ├── folder1/                     ├── folder1/                   
-    │   └── file3.txt                │   └── .shasum               
-    └── folder2/                     └── folder2/                   
-        └── file4.txt                    └── .shasum               
+    +---- file1.txt                    +---- .shasum                    
+    +---- file2.txt                    +---- checksums.sha256          
+    +---- folder1/                     +---- folder1/                   
+    |   \---- file3.txt                |   \---- .shasum               
+    \---- folder2/                     \---- folder2/                   
+        \---- file4.txt                    \---- .shasum               
 
 EXAMPLES:
     dazzlesum create -r --shadow-dir ./checksums       # Generate to shadow
@@ -3821,6 +3868,8 @@ def execute_verify_action(args, directory):
     generator = ChecksumGenerator(
         algorithm=args.algorithm,
         line_ending_strategy=args.line_endings,
+        include_patterns=getattr(args, 'include', None) or [],
+        exclude_patterns=getattr(args, 'exclude', None) or [],
         follow_symlinks=args.follow_symlinks,
         log_file=getattr(args, 'log', None),
         summary_mode=False,  # Verify mode doesn't use summary
