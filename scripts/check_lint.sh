@@ -1,6 +1,16 @@
 #!/bin/bash
 # Enhanced lint check script with strict mode support
 
+# Detect working Python: prefer python3 with flake8 (Linux/CI), fall back to python (Windows)
+if python3 -m flake8 --version >/dev/null 2>&1; then
+    PYTHON=python3
+elif python -m flake8 --version >/dev/null 2>&1; then
+    PYTHON=python
+else
+    echo "No Python with flake8 found"
+    exit 1
+fi
+
 STRICT_MODE=false
 if [[ "$1" == "--strict" ]]; then
     STRICT_MODE=true
@@ -8,7 +18,7 @@ fi
 
 echo "Running flake8 linting check..."
 # Match CI behavior: use --count flag which exits with error count
-if python3 -m flake8 dazzlesum.py tests/ --exclude=tests/test_runs/ --count --statistics; then
+if $PYTHON -m flake8 dazzlesum.py tests/ --exclude=tests/test_runs/ --count --statistics; then
     echo "✅ Flake8 check passed!"
 else
     EXIT_CODE=$?
@@ -23,7 +33,7 @@ else
 fi
 
 echo "Running Python syntax check..."
-if python3 -m py_compile dazzlesum.py; then
+if $PYTHON -m py_compile dazzlesum.py; then
     echo "✅ Python syntax check passed!"
 else
     echo "❌ Python syntax check failed!"
