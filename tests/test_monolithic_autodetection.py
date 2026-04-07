@@ -119,7 +119,8 @@ hash2  file2.txt
                 # Test auto-detection
                 detected_file = auto_detect_checksum_file(self.test_path)
                 self.assertIsNotNone(detected_file, f"Failed to detect {pattern}")
-                self.assertEqual(detected_file.name, pattern)
+                # Case-insensitive comparison for Windows filesystem compatibility
+                self.assertEqual(detected_file.name.lower(), pattern.lower())
                 self.assertTrue(is_monolithic_file(detected_file))
 
     def test_auto_detect_custom_extensions(self):
