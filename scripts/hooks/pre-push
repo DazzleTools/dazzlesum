@@ -57,7 +57,8 @@ else
     # FEATURE BRANCHES - Minimal validation
     echo "🔧 Minimal validation (feature branch)"
     
-    python3 -m py_compile dazzlesum.py || {
+    if python3 -c "import py_compile" >/dev/null 2>&1; then PY=python3; else PY=python; fi
+    $PY -m py_compile dazzlesum.py || {
         echo "❌ Python syntax errors found"
         echo "💡 Fix syntax errors before pushing"
         exit 1
