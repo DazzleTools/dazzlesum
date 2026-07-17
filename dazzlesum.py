@@ -50,10 +50,10 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 # (component-per-line form is what its parser expects)
 MAJOR = 1
 MINOR = 4
-PATCH = 4
+PATCH = 5
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.4.4_main_90-20260717-bd968142"
+__version__ = "1.4.5_main_91-20260717-68a5b17c"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""

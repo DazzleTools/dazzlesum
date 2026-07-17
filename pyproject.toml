@@ -20,17 +20,18 @@ classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Archiving",
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
 ]
-requires-python = ">=3.7"
+# 3.9 floor aligns with the DazzleLib stack (dazzle-lib/filekit/linklib/
+# preservelib/tree-lib all require >=3.9) for the src/ refactor
+requires-python = ">=3.9"
 
 [project.urls]
 Homepage = "https://github.com/DazzleTools/dazzlesum"
@@ -48,10 +49,8 @@ windows = [
 ]
 dev = [
     "pytest>=7.0.0",
-    "black>=23.0.0;python_version>='3.8'",
-    "black==23.3.0;python_version=='3.7'",  # Last version supporting Python 3.7
-    "flake8>=5.0.0;python_version=='3.7'",  # Max version for Python 3.7
-    "flake8>=6.0.0;python_version>='3.8'",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
     "mypy>=1.0.0",
 ]
 

@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.4.5] - 2026-07-17
+
+### Changed
+- Python floor raised from 3.7 to 3.9, aligning with the DazzleLib stack (dazzle-lib, dazzle-filekit, dazzle-linklib, dazzle-preservelib, dazzle-tree-lib all require >=3.9) in preparation for the src/ refactor; 3.13 added to the CI matrix and classifiers; dead 3.7-conditional dev dependencies removed
+
 ## [1.4.4] - 2026-07-17
 
 ### Fixed
