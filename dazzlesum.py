@@ -53,7 +53,7 @@ MINOR = 4
 PATCH = 4
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.4.4_main_90-20260717-6826a1a9"
+__version__ = "1.4.4_main_90-20260717-bd968142"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""

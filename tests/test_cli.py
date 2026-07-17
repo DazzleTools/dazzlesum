@@ -79,7 +79,6 @@ class TestCLIInterface(unittest.TestCase):
         maintained by the git hooks / repokit tooling, and a commit that ships
         a stale stamp (hooks not installed or not run) fails the suite instead
         of being papered over at runtime."""
-        import dazzlesum
         self.assertTrue(
             dazzlesum.__version__.startswith(dazzlesum.get_package_version()),
             f"__version__={dazzlesum.__version__!r} does not match "
@@ -91,7 +90,6 @@ class TestCLIInterface(unittest.TestCase):
         Regression: --version previously printed the static __version__ build
         stamp, which goes stale on machines without the git hooks installed
         (showed 1.3.6 while the package was 1.4.0); -V did not exist."""
-        import dazzlesum
         expected = f"dazzlesum {dazzlesum.get_package_version()}"
         for flag in ("--version", "-V"):
             result = self.run_dazzlesum([flag])
