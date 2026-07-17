@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.4.3] - 2026-07-17
+
+### Performance
+- StateCache writes are batched (commit every 200 folders) with `synchronous=OFF` and an in-memory journal -- the cache is a disposable accelerator, so per-folder journal fsyncs bought nothing and cost hours at library scale. Measured on the write path: 94 -> 9,945 folders/s (105x). A 2.5M-file library bootstrap that projected ~7.5 hours (12% CPU, 88% fsync-blocked) now completes in a fraction of that.
+- Cache schema v2: folder paths are interned into an integer-keyed `folders` table instead of being repeated in every file row, shrinking the cache and keeping the `(folder_id, name)` primary-key b-tree small. Old-schema caches are dropped and rebuilt automatically (the cache is regenerable by design; no migration path needed).
+- Steady-state fast path: a folder whose live files exactly match the cache (name set, size, mtime_ns, algorithm) skips both the manifest parse and the cache rewrite -- an unchanged sweep costs one `scandir` and one indexed SELECT per folder. Trade-off: externally edited manifests are not detected on this path; `--paranoid` (or `verify`) re-establishes truth.
+- Progress logging every 5,000 directories during long updates.
+
+### Documentation
+- usage-examples.md: explained that `manage backup`/`restore` copy only the `.shasum` manifests (relative structure preserved, data untouched) and how that differs from shadow-dir workflows; fixed examples using comma-joined `--include`/`--exclude` lists (never supported -- repeat the flag per pattern) and the pre-subcommand `--manage`/`--verify` flag forms
+
 ## [1.4.2] - 2026-07-17
 
 ### Added

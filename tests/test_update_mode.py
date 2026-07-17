@@ -174,9 +174,12 @@ class TestUpdateBasics(UpdateModeTestBase):
         generator.run_update(self.root, recursive=True)
         self.assertEqual(counter.count, 0)
 
-    def test_external_manifest_edit_triggers_rehash(self):
-        """A manifest hash that disagrees with the cache means someone edited
-        the manifest externally -- update must re-establish truth."""
+    def test_external_manifest_edit_healed_by_paranoid(self):
+        """Since the steady-state fast path (v1.4.3), a default update does
+        NOT re-read manifests for unchanged folders, so an external manifest
+        edit is not detected there -- that is the documented trade-off for
+        skipping ~160K manifest reads per sweep. --paranoid re-establishes
+        truth (as does verify)."""
         self.first_update()
         manifest_path = self.root / dazzlesum.SHASUM_FILENAME
         good_hash = self.read_manifest(self.root)["a.txt"]
@@ -184,9 +187,39 @@ class TestUpdateBasics(UpdateModeTestBase):
             good_hash, "0" * len(good_hash))
         manifest_path.write_text(tampered, encoding='utf-8')
 
+        # Default sweep: folder stats unchanged -> fast path -> tamper NOT seen
         totals = self.first_update()
+        self.assertEqual(totals['rehashed'], 0)
+        self.assertNotEqual(self.read_manifest(self.root)["a.txt"], good_hash)
+
+        # Paranoid sweep: full rehash re-establishes the true hash
+        totals = self.first_update(paranoid=True)
         self.assertGreaterEqual(totals['rehashed'], 1)
         self.assertEqual(self.read_manifest(self.root)["a.txt"], good_hash)
+
+    def test_fast_path_skips_cache_rewrite(self):
+        """Unchanged folders must not rewrite their cache rows (scanned_at
+        stays put) -- proof the steady-state sweep is read-only per folder."""
+        self.first_update()
+        cache_path = self.root / dazzlesum.CACHE_FILENAME
+        with dazzlesum.StateCache(cache_path) as cache:
+            before = cache.conn.execute(
+                "SELECT name, scanned_at FROM file_state ORDER BY name").fetchall()
+
+        self.first_update()
+        with dazzlesum.StateCache(cache_path) as cache:
+            after = cache.conn.execute(
+                "SELECT name, scanned_at FROM file_state ORDER BY name").fetchall()
+        self.assertEqual(before, after)
+
+    def test_missing_manifest_defeats_fast_path(self):
+        """If the manifest was deleted externally, the fast path must not
+        skip -- the folder needs its manifest regenerated."""
+        self.first_update()
+        (self.root / dazzlesum.SHASUM_FILENAME).unlink()
+        totals = self.first_update()
+        self.assertGreaterEqual(totals['rewritten'], 1)
+        self.assertTrue((self.root / dazzlesum.SHASUM_FILENAME).exists())
 
     def test_cache_file_never_checksummed(self):
         self.first_update()
@@ -429,8 +462,46 @@ class TestStateCacheUnit(unittest.TestCase):
         with dazzlesum.StateCache(self.temp_dir / "cache.sqlite") as cache:
             cols = [row[1] for row in
                     cache.conn.execute("PRAGMA table_info(file_state)")]
-        self.assertEqual(cols, ['folder', 'name', 'size', 'mtime_ns',
+            folder_cols = [row[1] for row in
+                           cache.conn.execute("PRAGMA table_info(folders)")]
+        self.assertEqual(cols, ['folder_id', 'name', 'size', 'mtime_ns',
                                 'algo', 'hash', 'scanned_at'])
+        self.assertEqual(folder_cols, ['id', 'path'])
+
+    def test_old_schema_cache_is_rebuilt(self):
+        """A cache with an older schema is dropped and rebuilt, never
+        migrated -- the cache is regenerable by design."""
+        cache_path = self.temp_dir / "cache.sqlite"
+        conn = sqlite3.connect(str(cache_path))
+        conn.execute("CREATE TABLE file_state (folder TEXT, name TEXT, "
+                     "size INTEGER, mtime_ns INTEGER, algo TEXT, hash TEXT, "
+                     "scanned_at TEXT, PRIMARY KEY (folder, name))")
+        conn.execute("INSERT INTO file_state VALUES ('x', 'y', 1, 2, "
+                     "'sha256', 'ab', 'ts')")
+        conn.commit()
+        conn.close()
+
+        with dazzlesum.StateCache(cache_path) as cache:
+            # v1 layout replaced by v2; old rows gone, new schema usable
+            self.assertEqual(cache.get_folder("x"), {})
+            cache.replace_folder("x", {"y": {'size': 1, 'mtime_ns': 2,
+                                             'algo': 'sha256', 'hash': 'ab' * 32}})
+            self.assertIn("y", cache.get_folder("x"))
+
+    def test_batched_writes_persist_on_close(self):
+        """replace_folder batches commits (COMMIT_EVERY); close() must flush
+        the tail so nothing under the threshold is lost."""
+        cache_path = self.temp_dir / "cache.sqlite"
+        with dazzlesum.StateCache(cache_path) as cache:
+            self.assertGreater(cache.COMMIT_EVERY, 3)  # stay under threshold
+            for i in range(3):
+                cache.replace_folder(f"f{i}", {"a": {'size': i, 'mtime_ns': i,
+                                                     'algo': 'sha256',
+                                                     'hash': 'cd' * 32}})
+        # Fresh connection: data must have been committed by close()
+        with dazzlesum.StateCache(cache_path) as cache:
+            for i in range(3):
+                self.assertIn("a", cache.get_folder(f"f{i}"))
 
 
 if __name__ == '__main__':

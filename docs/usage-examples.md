@@ -75,18 +75,30 @@ dazzlesum verify -r ./deployed --output release-checksums.sha256
 
 ### Data Migration
 
+`manage backup` copies **only the `.shasum` manifest files** out of a data tree, never the data itself. Each manifest is copied to the same relative position under `--backup-dir`, producing a parallel tree of just the verification metadata:
+
+```
+/data/.shasum              ->  /checksums/.shasum
+/data/photos/.shasum       ->  /checksums/photos/.shasum
+/data/photos/2024/.shasum  ->  /checksums/photos/2024/.shasum
+```
+
+The source tree is untouched (add `--dry-run` to preview). Because manifests are tiny compared to the data, this gives you a portable snapshot of the integrity layer that travels separately from the data.
+
 On source system:
 ```bash
-# Create backup of checksums
+# Snapshot the checksum manifests (data files are not copied)
 dazzlesum manage -r /data backup --backup-dir /checksums
 ```
 
-On target system:
+On target system, `restore` is the mirror image: it re-plants each backed-up manifest at the same relative position under the target root, so the checksums re-attach to the migrated data wherever it now lives:
 ```bash
-# Restore checksums and verify
+# Restore manifests onto the migrated tree, then verify the data against them
 dazzlesum manage -r /migrated-data restore --backup-dir /checksums
 dazzlesum verify -r /migrated-data -v
 ```
+
+Note: `manage backup` finds manifests stored **in-tree** (the default layout). If you use `--shadow-dir`, your manifests already live in a separate parallel tree -- that shadow tree *is* your checksum layer, and you can back it up directly with ordinary tools (or version it in git).
 
 ### Shadow Directory Workflows
 
@@ -106,21 +118,25 @@ dazzlesum create -r /project --mode both --shadow-dir ./checksums
 ## File Organization
 
 ### Media Library Management
+
+`--include` and `--exclude` take ONE pattern each; repeat the flag for multiple patterns (comma-joined lists inside a single argument are not split and will not match anything):
+
 ```bash
 # Generate checksums for media collection
-dazzlesum -r /media/library --include "*.mp4,*.mkv,*.mp3,*.flac"
+dazzlesum create -r /media/library --include "*.mp4" --include "*.mkv" --include "*.mp3" --include "*.flac"
 
 # Verify after moving files
-dazzlesum -r /media/library --verify --include "*.mp4,*.mkv,*.mp3,*.flac"
+dazzlesum verify -r /media/library --include "*.mp4" --include "*.mkv" --include "*.mp3" --include "*.flac"
 ```
 
 ### Project Synchronization
 ```bash
-# Generate checksums excluding temporary files
-dazzlesum -r /project --exclude "*.tmp,*.log,node_modules/**,__pycache__/**"
+# Generate checksums excluding temporary files and dependency dirs
+# (a bare directory name like "node_modules" excludes the whole subtree)
+dazzlesum create -r /project --exclude "*.tmp" --exclude "*.log" --exclude "node_modules" --exclude "__pycache__"
 
-# Verify project integrity after sync
-dazzlesum -r /project --verify --exclude "*.tmp,*.log,node_modules/**,__pycache__/**"
+# Verify project integrity after sync (same patterns)
+dazzlesum verify -r /project --exclude "*.tmp" --exclude "*.log" --exclude "node_modules" --exclude "__pycache__"
 ```
 
 ### Version Control Integration with Shadow Directories
@@ -154,8 +170,8 @@ dazzlesum -r /huge/directory --summary
 # Process network shares efficiently
 dazzlesum -r "//server/share" --algorithm sha256
 
-# Backup checksums before network operations
-dazzlesum -r "//server/share" --manage backup --backup-dir ./network-checksums
+# Backup checksum manifests before network operations (copies only .shasum files)
+dazzlesum manage -r "//server/share" backup --backup-dir ./network-checksums
 
 # Use shadow directories for network shares to avoid network I/O for checksums
 dazzlesum -r "//server/share" --shadow-dir ./local-checksums
@@ -178,7 +194,7 @@ dazzlesum -r --force-python
 dazzlesum -r --continue-on-error
 
 # Dry run to see what would be processed
-dazzlesum -r --manage remove --dry-run
+dazzlesum manage -r . remove --dry-run
 ```
 
 ## Cross-Platform Usage
@@ -200,8 +216,8 @@ dazzlesum.py -r C:\ImportantData --shadow-dir C:\Checksums
 # Use with PowerShell
 python dazzlesum.py -r C:\Projects --mode both
 
-# Backup to different drive
-python dazzlesum.py -r C:\Data --manage backup --backup-dir D:\Checksums
+# Backup checksum manifests to a different drive (copies only .shasum files)
+python dazzlesum.py manage -r C:\Data backup --backup-dir D:\Checksums
 
 # Shadow directories with PowerShell
 python dazzlesum.py -r C:\ProjectData --shadow-dir D:\ProjectChecksums --mode both
@@ -284,10 +300,10 @@ SHADOW_DIR="./.checksums"
 
 # Generate checksums for staged files using shadow directory
 echo "Verifying staged files integrity..."
-dazzlesum -r . --shadow-dir "$SHADOW_DIR" --exclude ".git/**,.checksums/**"
+dazzlesum create -r . --shadow-dir "$SHADOW_DIR" --exclude ".git" --exclude ".checksums"
 
 # Verify integrity
-if dazzlesum -r . --verify --shadow-dir "$SHADOW_DIR" --exclude ".git/**,.checksums/**" --quiet; then
+if dazzlesum verify -r . --shadow-dir "$SHADOW_DIR" --exclude ".git" --exclude ".checksums" -q; then
     echo "✓ File integrity verified"
     exit 0
 else

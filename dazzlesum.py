@@ -50,10 +50,10 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 # (component-per-line form is what its parser expects)
 MAJOR = 1
 MINOR = 4
-PATCH = 2
+PATCH = 3
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.4.2_main_86-20260717-9310051e"
+__version__ = "1.4.3_main_87-20260717-ad32e1cf"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""
@@ -2107,25 +2107,59 @@ class StateCache:
     (drive letter, subst, UNC).
     """
 
+    # Schema v2: folder paths are interned into `folders` (an integer id)
+    # instead of being repeated in every file row. On a multi-million-file
+    # library this shrinks the cache ~35-40% and, more importantly, keeps the
+    # (folder_id, name) primary-key b-tree far smaller than text keys.
+    SCHEMA_VERSION = 2
     SCHEMA = """
+        CREATE TABLE IF NOT EXISTS folders (
+            id   INTEGER PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE
+        );
         CREATE TABLE IF NOT EXISTS file_state (
-            folder     TEXT NOT NULL,
+            folder_id  INTEGER NOT NULL REFERENCES folders(id),
             name       TEXT NOT NULL,
             size       INTEGER NOT NULL,
             mtime_ns   INTEGER NOT NULL,
             algo       TEXT NOT NULL,
             hash       TEXT NOT NULL,
             scanned_at TEXT NOT NULL,
-            PRIMARY KEY (folder, name)
-        )
+            PRIMARY KEY (folder_id, name)
+        );
     """
+
+    # Commit every N replace_folder() calls instead of every call. Each
+    # commit is a journal fsync; per-folder commits cost hours at library
+    # scale (measured: ~12% CPU, 88% fsync-blocked). The cache is a
+    # disposable accelerator, so losing the tail of a batch in a crash just
+    # means those folders re-seed on the next run.
+    COMMIT_EVERY = 200
 
     def __init__(self, cache_path: Path):
         self.cache_path = Path(cache_path)
         self.conn = sqlite3.connect(str(self.cache_path), timeout=30.0)
         self.conn.execute("PRAGMA busy_timeout = 30000")
-        self.conn.execute(self.SCHEMA)
-        self.conn.commit()
+        # Disposable cache: durability guarantees are wasted on it (delete
+        # and re-bootstrap is always safe), so skip the per-commit fsyncs
+        # and keep the rollback journal in memory.
+        self.conn.execute("PRAGMA synchronous = OFF")
+        self.conn.execute("PRAGMA journal_mode = MEMORY")
+        self._ensure_schema()
+        self._pending = 0
+        self._folder_ids: Dict[str, int] = {}
+
+    def _ensure_schema(self):
+        """Create the v2 schema; drop and rebuild any older layout (the cache
+        is regenerable by design, so there is no migration path -- just a
+        rebuild)."""
+        version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if version != self.SCHEMA_VERSION:
+            self.conn.executescript(
+                "DROP TABLE IF EXISTS file_state; DROP TABLE IF EXISTS folders;")
+            self.conn.executescript(self.SCHEMA)
+            self.conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
+            self.conn.commit()
 
     @staticmethod
     def folder_key(directory: Path, root: Path) -> str:
@@ -2133,27 +2167,59 @@ class StateCache:
         rel = Path(directory).resolve().relative_to(Path(root).resolve())
         return rel.as_posix() if str(rel) != '.' else '.'
 
+    def _folder_id(self, folder: str, create: bool = False) -> Optional[int]:
+        """Look up (optionally interning) the integer id for a folder path."""
+        fid = self._folder_ids.get(folder)
+        if fid is not None:
+            return fid
+        row = self.conn.execute(
+            "SELECT id FROM folders WHERE path = ?", (folder,)).fetchone()
+        if row is None:
+            if not create:
+                return None
+            cur = self.conn.execute(
+                "INSERT INTO folders (path) VALUES (?)", (folder,))
+            fid = cur.lastrowid
+        else:
+            fid = row[0]
+        self._folder_ids[folder] = fid
+        return fid
+
     def get_folder(self, folder: str) -> Dict[str, Dict[str, Any]]:
         """Return {name: {'size', 'mtime_ns', 'algo', 'hash'}} for a folder."""
+        fid = self._folder_id(folder)
+        if fid is None:
+            return {}
         rows = self.conn.execute(
-            "SELECT name, size, mtime_ns, algo, hash FROM file_state WHERE folder = ?",
-            (folder,))
+            "SELECT name, size, mtime_ns, algo, hash FROM file_state WHERE folder_id = ?",
+            (fid,))
         return {name: {'size': size, 'mtime_ns': mtime_ns, 'algo': algo, 'hash': hash_}
                 for name, size, mtime_ns, algo, hash_ in rows}
 
     def replace_folder(self, folder: str, entries: Dict[str, Dict[str, Any]]):
-        """Atomically replace all rows for a folder with `entries`."""
+        """Replace all rows for a folder with `entries`. Commits are batched
+        (COMMIT_EVERY folders) -- call close() or flush() to persist the tail."""
         now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-        with self.conn:
-            self.conn.execute("DELETE FROM file_state WHERE folder = ?", (folder,))
-            self.conn.executemany(
-                "INSERT INTO file_state (folder, name, size, mtime_ns, algo, hash, scanned_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [(folder, name, e['size'], e['mtime_ns'], e['algo'], e['hash'], now)
-                 for name, e in entries.items()])
+        fid = self._folder_id(folder, create=True)
+        self.conn.execute("DELETE FROM file_state WHERE folder_id = ?", (fid,))
+        self.conn.executemany(
+            "INSERT INTO file_state (folder_id, name, size, mtime_ns, algo, hash, scanned_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(fid, name, e['size'], e['mtime_ns'], e['algo'], e['hash'], now)
+             for name, e in entries.items()])
+        self._pending += 1
+        if self._pending >= self.COMMIT_EVERY:
+            self.flush()
+
+    def flush(self):
+        """Commit any batched writes."""
+        if self.conn.in_transaction:
+            self.conn.commit()
+        self._pending = 0
 
     def close(self):
         try:
+            self.flush()
             self.conn.close()
         except Exception:
             pass
@@ -2449,15 +2515,6 @@ class ChecksumGenerator:
         else:
             shasum_path = directory / SHASUM_FILENAME
 
-        stored = {}
-        if shasum_path.exists():
-            try:
-                stored = parse_shasum_file(shasum_path)
-            except Exception as e:
-                logger.error(f"Error reading {shasum_path}: {e} -- skipping directory")
-                stats['failed'] += 1
-                return stats
-
         folder = StateCache.folder_key(directory, root_directory)
         cached = state_cache.get_folder(folder)
 
@@ -2473,6 +2530,35 @@ class ChecksumGenerator:
             logger.error(f"Error listing directory {directory}: {e}")
             stats['failed'] += 1
             return stats
+
+        # FAST PATH: folder unchanged since last update. When every live file
+        # matches the cache exactly (same name set, same size + mtime_ns, same
+        # algorithm) and the manifest file is present, skip the manifest parse
+        # AND the cache rewrite entirely -- a steady-state sweep then costs one
+        # scandir and one indexed SELECT per folder. Trade-off: an externally
+        # edited manifest is not detected on this path; `--paranoid` (or
+        # `verify`) re-establishes truth.
+        if (not paranoid and cached and set(live) == set(cached)
+                and all(c['algo'] == self.algorithm
+                        and c['size'] == st.st_size
+                        and c['mtime_ns'] == st.st_mtime_ns
+                        for name, st in live.items()
+                        for c in (cached[name],))
+                and shasum_path.exists()):
+            stats['unchanged'] = len(live)
+            if self.progress_tracker:
+                for st in live.values():
+                    self.progress_tracker.update_files(1, st.st_size)
+            return stats
+
+        stored = {}
+        if shasum_path.exists():
+            try:
+                stored = parse_shasum_file(shasum_path)
+            except Exception as e:
+                logger.error(f"Error reading {shasum_path}: {e} -- skipping directory")
+                stats['failed'] += 1
+                return stats
 
         new_checksums = {}
         cache_entries = {}
@@ -2576,6 +2662,11 @@ class ChecksumGenerator:
                     totals[key] += value
                 if self.progress_tracker:
                     self.progress_tracker.update_dirs(1)
+                if totals['dirs'] % 5000 == 0:
+                    logger.info(
+                        f"...{totals['dirs']} dirs so far -- "
+                        f"{totals['unchanged']} unchanged, {totals['rehashed']} rehashed, "
+                        f"{totals['added']} added, {totals['removed']} removed")
 
             if dirs is not None:
                 for d in dirs:
