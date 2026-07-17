@@ -46,11 +46,14 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
 # Version information
-# Base semantic version (manually maintained for git hooks)
-MAJOR, MINOR, PATCH = 1, 4, 1
+# Base semantic version -- managed by scripts/repokit-common/sync-versions.py
+# (component-per-line form is what its parser expects)
+MAJOR = 1
+MINOR = 4
+PATCH = 2
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.4.1_81-20260407-9ec9ccb8"
+__version__ = "1.4.2_main_85-20260717-72a2e906"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""

@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.4.2] - 2026-07-17
+
+### Added
+- `git-repokit-common` integrated as a subtree at `scripts/repokit-common/` (shared DazzleTools project tooling: `sync-versions.py`, hooks, `gh_issue_full.py`, and more); update with `git subtree pull --prefix=scripts/repokit-common repokit-common main --squash`
+- `[tool.repokit-common]` section in `pyproject.toml` wiring `version-source` to `dazzlesum.py`
+
+### Changed
+- Version stamping now uses repokit-common's `sync-versions.py` via its git hooks (pre-commit/post-commit/pre-push); the `__version__` build string carries branch, build count, current date, and parent hash (the previous hand-rolled hook reused stale date/hash fields)
+- Version components use the repokit component-per-line convention (`MAJOR = 1` ...) instead of the tuple form
+
+### Removed
+- Hand-rolled `scripts/install-hooks.sh` and `scripts/hooks/` (superseded by the subtree's hook system; `check_lint.sh`, `check_tests.sh`, and the dazzlesum-specific `check_dist_no_leak.py` remain)
+
 ## [1.4.1] - 2026-07-17
 
 ### Added
