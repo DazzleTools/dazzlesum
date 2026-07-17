@@ -72,6 +72,32 @@ class TestCLIInterface(unittest.TestCase):
         self.assertIn("Verify file integrity", result.stdout)
         self.assertIn("--show-all-verifications", result.stdout)
     
+    def test_dunder_version_never_stale(self):
+        """__version__ must always start with the current MAJOR.MINOR.PATCH.
+
+        This is the CI-level enforcement of version consistency: the stamp is
+        maintained by the git hooks / repokit tooling, and a commit that ships
+        a stale stamp (hooks not installed or not run) fails the suite instead
+        of being papered over at runtime."""
+        import dazzlesum
+        self.assertTrue(
+            dazzlesum.__version__.startswith(dazzlesum.get_package_version()),
+            f"__version__={dazzlesum.__version__!r} does not match "
+            f"semver {dazzlesum.get_package_version()!r}")
+
+    def test_version_flags(self):
+        """--version and -V print the current derived version and exit 0.
+
+        Regression: --version previously printed the static __version__ build
+        stamp, which goes stale on machines without the git hooks installed
+        (showed 1.3.6 while the package was 1.4.0); -V did not exist."""
+        import dazzlesum
+        expected = f"dazzlesum {dazzlesum.get_package_version()}"
+        for flag in ("--version", "-V"):
+            result = self.run_dazzlesum([flag])
+            self.assertEqual(result.returncode, 0, flag)
+            self.assertIn(expected, result.stdout, flag)
+
     def test_update_subcommand_help(self):
         """Test update subcommand help."""
         result = self.run_dazzlesum(["update", "--help"])

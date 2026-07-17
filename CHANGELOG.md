@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.4.1] - 2026-07-17
+
+### Added
+- `-V` short form for `--version`
+
+### Fixed
+- `--version` printed the static hook-stamped build string, which goes stale on machines without the git hooks installed (showed 1.3.6 while the package was 1.4.0); it now derives from MAJOR/MINOR/PATCH. Version-stamp correctness is the job of the git hooks / repokit tooling, not runtime code.
+
+### Removed
+- `setup.py`: fully superseded by `pyproject.toml` (dynamic version from `dazzlesum.get_package_version`); removing it eliminates the last duplicate version parser and duplicated metadata
+
+### Changed
+- README badge order: PyPI version and release date now lead, CI follows
+
 ## [1.4.0] - 2026-07-17
 
 ### Added

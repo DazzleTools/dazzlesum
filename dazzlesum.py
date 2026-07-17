@@ -47,10 +47,10 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
 # Version information
 # Base semantic version (manually maintained for git hooks)
-MAJOR, MINOR, PATCH = 1, 4, 0
+MAJOR, MINOR, PATCH = 1, 4, 1
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.3.6_71-20260407-2e5efae1"
+__version__ = "1.4.1_81-20260407-9ec9ccb8"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""
@@ -3824,8 +3824,11 @@ For detailed help on any command: %(prog)s <command> --help
 For comprehensive examples: %(prog)s examples
         """)
     
-    # Version at main level
-    parser.add_argument('--version', action='version', version=f'dazzlesum {__version__}')
+    # Version at main level. get_package_version() derives from
+    # MAJOR/MINOR/PATCH and is always current; __version__ is the git-hook
+    # build stamp, which can be stale on machines without the hooks installed.
+    parser.add_argument('--version', '-V', action='version',
+                       version=f'dazzlesum {get_package_version()}')
     
     # Create subparsers
     subparsers = parser.add_subparsers(dest='command', help='Available commands',

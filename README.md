@@ -1,8 +1,8 @@
 # Dazzlesum
 
-[![CI](https://github.com/DazzleTools/dazzlesum/actions/workflows/python.yml/badge.svg)](https://github.com/DazzleTools/dazzlesum/actions)
 [![PyPI](https://img.shields.io/pypi/v/dazzlesum?color=green)](https://pypi.org/project/dazzlesum/)
 [![Release Date](https://img.shields.io/github/release-date/DazzleTools/dazzlesum?color=green)](https://github.com/DazzleTools/dazzlesum/releases)
+[![CI](https://github.com/DazzleTools/dazzlesum/actions/workflows/python.yml/badge.svg)](https://github.com/DazzleTools/dazzlesum/actions)
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3-green.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20BSD-lightgrey.svg)](#installation)
