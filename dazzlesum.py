@@ -38,6 +38,7 @@ import hashlib
 import logging
 import argparse
 import platform
+import sqlite3
 import subprocess
 import shutil
 from collections import deque
@@ -46,7 +47,7 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
 # Version information
 # Base semantic version (manually maintained for git hooks)
-MAJOR, MINOR, PATCH = 1, 3, 6
+MAJOR, MINOR, PATCH = 1, 4, 0
 
 # Static version string (updated automatically by git hooks)
 __version__ = "1.3.6_71-20260407-2e5efae1"
@@ -80,6 +81,7 @@ DEFAULT_CHUNK_SIZE = 8192
 SUPPORTED_ALGORITHMS = ['md5', 'sha1', 'sha256', 'sha512']
 SHASUM_FILENAME = '.shasum'
 STATE_FILENAME = '.dazzle-state.json'
+CACHE_FILENAME = '.dazzle-cache.sqlite'
 MONOLITHIC_DEFAULT_NAME = 'checksums'
 
 # Set up logging
@@ -1442,8 +1444,10 @@ def _should_include_file_simple(file_path: Path, include_patterns, exclude_patte
     """Simplified version of file inclusion check for counting."""
     filename = file_path.name
 
-    # Always exclude our own files
-    if filename in [SHASUM_FILENAME, STATE_FILENAME]:
+    # Always exclude our own files (CACHE_FILENAME prefix also covers
+    # SQLite sidecars like .dazzle-cache.sqlite-journal)
+    if filename in [SHASUM_FILENAME, STATE_FILENAME, SHASUM_FILENAME + '.tmp'] \
+            or filename.startswith(CACHE_FILENAME):
         return False
 
     # Apply exclude patterns
@@ -1550,8 +1554,8 @@ class SymlinkHandler:
                 return True, 'symlink'
 
             # Windows junction detection
-            if is_windows() and path.is_dir():
-                return self._is_junction(path), 'junction'
+            if is_windows() and path.is_dir() and self._is_junction(path):
+                return True, 'junction'
 
         except Exception as e:
             logger.debug(f"Error checking symlink status for {path}: {e}")
@@ -1559,37 +1563,28 @@ class SymlinkHandler:
         return False, None
 
     def _is_junction(self, path: Path) -> bool:
-        """Detect Windows junctions using various methods."""
+        """Detect Windows junctions via reparse-point attributes.
+
+        Pure lstat -- no subprocess, no resolve(). The previous implementation
+        shelled out to `dir /AL` for every NON-junction directory (~60ms each,
+        hours at library scale) and misclassified any directory reached
+        through a junction ancestor because resolve() != path for all of them.
+        """
         try:
-            # Method 1: Check file attributes
-            if hasattr(os, 'lstat'):
-                stat_info = os.lstat(str(path))
-                if hasattr(stat, 'S_ISLNK') and stat.S_ISLNK(stat_info.st_mode):
-                    return True
+            # Python 3.12+ has a dedicated check (reparse tag == mount point)
+            if hasattr(path, 'is_junction'):
+                return path.is_junction()
 
-            # Method 2: Try to resolve and check if different
-            try:
-                resolved = path.resolve()
-                if str(resolved) != str(path):
-                    return True
-            except Exception:
-                pass
-
-            # Method 3: Use dir command as fallback
-            try:
-                result = subprocess.run(
-                    ['dir', '/AL', str(path.parent)],
-                    capture_output=True, text=True, encoding='utf-8', errors='replace', shell=True
-                )
-                if result.returncode == 0:
-                    return '<JUNCTION>' in result.stdout and path.name in result.stdout
-            except Exception:
-                pass
-
-        except Exception as e:
+            stat_info = os.lstat(str(path))
+            attrs = getattr(stat_info, 'st_file_attributes', 0)
+            reparse = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x0400)
+            # Symlinks were already handled by the caller; any remaining
+            # directory reparse point (junction, mount point) should not be
+            # traversed by default.
+            return bool(attrs & reparse)
+        except OSError as e:
             logger.debug(f"Error detecting junction for {path}: {e}")
-
-        return False
+            return False
 
     def should_follow_link(self, path: Path, follow_symlinks: bool = False) -> bool:
         """Determine if we should follow this link."""
@@ -1660,11 +1655,26 @@ class SymlinkHandler:
 class FIFODirectoryWalker:
     """FIFO directory processor for memory-efficient traversal."""
 
-    def __init__(self, follow_symlinks=False):
+    def __init__(self, follow_symlinks=False, exclude_patterns=None):
         self.processing_queue = deque()
         self.symlink_handler = SymlinkHandler()
         self.follow_symlinks = follow_symlinks
+        self.exclude_patterns = exclude_patterns or []
         self.processed_count = 0
+
+    def _is_excluded_dir(self, item: Path) -> bool:
+        """Match a directory against exclude patterns (same Path.match
+        semantics as file exclusion). Historically --exclude only filtered
+        FILES by name -- traversal descended into .git, .private, etc. and
+        checksummed their contents, since files inside an excluded directory
+        don't themselves match the directory's pattern."""
+        for pattern in self.exclude_patterns:
+            try:
+                if item.match(pattern):
+                    return True
+            except ValueError:
+                continue
+        return False
 
     def walk_and_process(self, root_path: Path, processor_func, recursive=True):
         """
@@ -1709,7 +1719,9 @@ class FIFODirectoryWalker:
             if recursive:
                 try:
                     subdirs = [item for item in current_dir.iterdir()
-                              if item.is_dir() and not self.symlink_handler.is_visited(item)]
+                              if item.is_dir()
+                              and not self._is_excluded_dir(item)
+                              and not self.symlink_handler.is_visited(item)]
                     for subdir in subdirs:
                         self.processing_queue.append(subdir)
                         logger.debug(f"Added to queue: {subdir}")
@@ -1979,6 +1991,24 @@ def is_monolithic_file(file_path: Path) -> bool:
         return False
 
 
+def parse_shasum_file(shasum_path: Path) -> Dict[str, str]:
+    """Parse a .shasum file into {filename: hash} (hashes lowercased).
+
+    Comment lines (#) and malformed lines are skipped. Raises OSError on
+    read failure so callers can distinguish 'missing/unreadable' from 'empty'.
+    """
+    stored_checksums = {}
+    with open(shasum_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                parts = line.split('  ', 1)
+                if len(parts) == 2:
+                    hash_value, filename = parts
+                    stored_checksums[filename] = hash_value.lower()
+    return stored_checksums
+
+
 class ShadowPathResolver:
     """Resolves paths between source directories and shadow directory structure.
     
@@ -2054,6 +2084,83 @@ class ShadowPathResolver:
         if output_filename:
             return self.shadow_root / output_filename
         return self.shadow_root / f"{MONOLITHIC_DEFAULT_NAME}.{algorithm}"
+
+
+class StateCache:
+    """Per-machine (size, mtime_ns) state cache backing incremental updates.
+
+    Lives in ONE SQLite file at the shadow root (or the scan root when no
+    shadow dir is used). It is a disposable accelerator, NOT part of the
+    checksum record: hashes in .shasum files remain the only durable truth.
+    Delete the file and `update --bootstrap=...` rebuilds it.
+
+    Never sync or commit this file. Stat state (mtime especially) is only
+    meaningful on the machine that recorded it -- synced copies of a library
+    (e.g. via Resilio) carry origin mtimes that would poison another peer's
+    cache into silently skipping changed files.
+
+    Folder keys are POSIX-style paths relative to the scan root, so the cache
+    stays valid when the same tree is reached via different mounts
+    (drive letter, subst, UNC).
+    """
+
+    SCHEMA = """
+        CREATE TABLE IF NOT EXISTS file_state (
+            folder     TEXT NOT NULL,
+            name       TEXT NOT NULL,
+            size       INTEGER NOT NULL,
+            mtime_ns   INTEGER NOT NULL,
+            algo       TEXT NOT NULL,
+            hash       TEXT NOT NULL,
+            scanned_at TEXT NOT NULL,
+            PRIMARY KEY (folder, name)
+        )
+    """
+
+    def __init__(self, cache_path: Path):
+        self.cache_path = Path(cache_path)
+        self.conn = sqlite3.connect(str(self.cache_path), timeout=30.0)
+        self.conn.execute("PRAGMA busy_timeout = 30000")
+        self.conn.execute(self.SCHEMA)
+        self.conn.commit()
+
+    @staticmethod
+    def folder_key(directory: Path, root: Path) -> str:
+        """Stable per-tree key: POSIX relative path from scan root ('.' for root)."""
+        rel = Path(directory).resolve().relative_to(Path(root).resolve())
+        return rel.as_posix() if str(rel) != '.' else '.'
+
+    def get_folder(self, folder: str) -> Dict[str, Dict[str, Any]]:
+        """Return {name: {'size', 'mtime_ns', 'algo', 'hash'}} for a folder."""
+        rows = self.conn.execute(
+            "SELECT name, size, mtime_ns, algo, hash FROM file_state WHERE folder = ?",
+            (folder,))
+        return {name: {'size': size, 'mtime_ns': mtime_ns, 'algo': algo, 'hash': hash_}
+                for name, size, mtime_ns, algo, hash_ in rows}
+
+    def replace_folder(self, folder: str, entries: Dict[str, Dict[str, Any]]):
+        """Atomically replace all rows for a folder with `entries`."""
+        now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        with self.conn:
+            self.conn.execute("DELETE FROM file_state WHERE folder = ?", (folder,))
+            self.conn.executemany(
+                "INSERT INTO file_state (folder, name, size, mtime_ns, algo, hash, scanned_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(folder, name, e['size'], e['mtime_ns'], e['algo'], e['hash'], now)
+                 for name, e in entries.items()])
+
+    def close(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 
 
 class ChecksumGenerator:
@@ -2293,7 +2400,10 @@ class ChecksumGenerator:
             shasum_path = directory / SHASUM_FILENAME
 
         try:
-            with open(shasum_path, 'w', encoding='utf-8') as f:
+            # Write to a temp file then atomically replace, so an interrupted
+            # run never leaves a truncated .shasum behind.
+            temp_path = shasum_path.with_name(shasum_path.name + '.tmp')
+            with open(temp_path, 'w', encoding='utf-8') as f:
                 # Write header comment
                 f.write(f"# Dazzle checksum tool v{__version__} - {self.algorithm} - {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
 
@@ -2303,6 +2413,7 @@ class ChecksumGenerator:
 
                 # Write end marker
                 f.write("# End of checksums\n")
+            os.replace(temp_path, shasum_path)
 
             if self.log_file:
                 logger.info(f"Wrote {len(checksums)} checksums to {shasum_path}")
@@ -2314,6 +2425,181 @@ class ChecksumGenerator:
                 logger.error(f"Error writing .shasum file to {directory}: {e}")
             elif not self.summary_mode:
                 logger.error(f"Error writing .shasum file to {directory}: {e}")
+
+    def update_checksums_for_directory(self, directory: Path, state_cache: 'StateCache',
+                                       root_directory: Path, bootstrap='hash',
+                                       paranoid=False, keep_missing=False) -> Dict[str, int]:
+        """Incrementally update one directory's .shasum, rehashing only what changed.
+
+        Comparison is EQUALITY against recorded per-file state (size, mtime_ns),
+        not "is mtime newer" -- synced trees (e.g. Resilio) deliver content
+        changes carrying origin mtimes that can be OLDER than the last scan.
+
+        Returns stats: {unchanged, rehashed, added, removed, failed, rewritten}.
+        """
+        stats = {'unchanged': 0, 'rehashed': 0, 'added': 0,
+                 'removed': 0, 'failed': 0, 'rewritten': 0}
+
+        # Resolve manifest path (shadow or local)
+        if self.shadow_resolver:
+            shasum_path = self.shadow_resolver.get_shadow_shasum_path(directory)
+        else:
+            shasum_path = directory / SHASUM_FILENAME
+
+        stored = {}
+        if shasum_path.exists():
+            try:
+                stored = parse_shasum_file(shasum_path)
+            except Exception as e:
+                logger.error(f"Error reading {shasum_path}: {e} -- skipping directory")
+                stats['failed'] += 1
+                return stats
+
+        folder = StateCache.folder_key(directory, root_directory)
+        cached = state_cache.get_folder(folder)
+
+        # One scandir pass: live files + their stat info
+        live = {}
+        try:
+            with os.scandir(directory) as it:
+                for entry in it:
+                    if entry.is_file(follow_symlinks=self.follow_symlinks) \
+                            and self.should_include_file(Path(entry.path)):
+                        live[entry.name] = entry.stat(follow_symlinks=self.follow_symlinks)
+        except OSError as e:
+            logger.error(f"Error listing directory {directory}: {e}")
+            stats['failed'] += 1
+            return stats
+
+        new_checksums = {}
+        cache_entries = {}
+
+        for name, st in sorted(live.items()):
+            size, mtime_ns = st.st_size, st.st_mtime_ns
+            c = cached.get(name)
+            cache_valid = (not paranoid and c is not None
+                           and c['algo'] == self.algorithm
+                           and c['size'] == size
+                           and c['mtime_ns'] == mtime_ns)
+            # A manifest hash that disagrees with our own cache means the
+            # manifest was modified externally -- rehash to re-establish truth.
+            if cache_valid and name in stored and stored[name] != c['hash']:
+                cache_valid = False
+
+            if cache_valid:
+                hash_value = c['hash']
+                stats['unchanged'] += 1
+                if name not in stored:
+                    stats['added'] += 1  # manifest gains entry from cache, no rehash
+            elif (not paranoid and c is None and name in stored
+                    and bootstrap == 'trust'):
+                # Bootstrap-trust: seed cache from current stat + stored hash
+                # without rehashing. Only sound against a freshly generated
+                # manifest (the caller asserts that by choosing trust).
+                hash_value = stored[name]
+                stats['unchanged'] += 1
+            else:
+                try:
+                    hash_value = self.calculator.calculate_file_hash(Path(directory) / name)
+                    stats['rehashed'] += 1
+                    if name not in stored:
+                        stats['added'] += 1
+                except Exception as e:
+                    stats['failed'] += 1
+                    logger.error(f"Error processing {directory / name}: {e}")
+                    # Keep the previous manifest entry if one existed; skip caching.
+                    if name in stored:
+                        new_checksums[name] = {'hash': stored[name]}
+                    continue
+
+            new_checksums[name] = {'hash': hash_value, 'size': size,
+                                   'mtime': st.st_mtime, 'algorithm': self.algorithm}
+            cache_entries[name] = {'size': size, 'mtime_ns': mtime_ns,
+                                   'algo': self.algorithm, 'hash': hash_value}
+
+            if self.progress_tracker:
+                self.progress_tracker.update_files(1, size)
+
+        # Entries in the manifest whose files no longer exist
+        for name in stored:
+            if name not in live:
+                if keep_missing:
+                    new_checksums[name] = {'hash': stored[name]}
+                else:
+                    stats['removed'] += 1
+
+        # Rewrite the manifest ONLY if its checksum content actually changed --
+        # unchanged manifests stay byte-identical (no git churn, mtime preserved).
+        new_content = {name: info['hash'].lower() for name, info in new_checksums.items()}
+        if new_content != stored and (new_checksums or stored):
+            self.write_shasum_file(directory, new_checksums)
+            stats['rewritten'] += 1
+
+        state_cache.replace_folder(folder, cache_entries)
+        return stats
+
+    def run_update(self, root_directory: Path, recursive=True, dirs=None,
+                   bootstrap='hash', paranoid=False, keep_missing=False) -> Dict[str, int]:
+        """Orchestrate an incremental update over a tree or an explicit folder list.
+
+        `dirs` (iterable of paths under root_directory) is the universal
+        change-detection adapter: any external source (git hook, USN watcher,
+        cron sweep) can nominate suspect folders. Without it, the full tree is
+        swept -- complete, stat-bound, no daemon required.
+        """
+        root_directory = Path(root_directory).resolve()
+        if not root_directory.exists() or not root_directory.is_dir():
+            logger.error(f"Directory does not exist or is not a directory: {root_directory}")
+            return {}
+
+        if self.shadow_dir:
+            self.shadow_resolver = ShadowPathResolver(
+                source_root=root_directory, shadow_root=self.shadow_dir)
+            cache_path = self.shadow_resolver.shadow_root / CACHE_FILENAME
+        else:
+            cache_path = root_directory / CACHE_FILENAME
+
+        totals = {'dirs': 0, 'unchanged': 0, 'rehashed': 0, 'added': 0,
+                  'removed': 0, 'failed': 0, 'rewritten': 0}
+        start_time = time.time()
+
+        with StateCache(cache_path) as cache:
+            def update_single_directory(directory: Path):
+                stats = self.update_checksums_for_directory(
+                    directory, cache, root_directory, bootstrap=bootstrap,
+                    paranoid=paranoid, keep_missing=keep_missing)
+                totals['dirs'] += 1
+                for key, value in stats.items():
+                    totals[key] += value
+                if self.progress_tracker:
+                    self.progress_tracker.update_dirs(1)
+
+            if dirs is not None:
+                for d in dirs:
+                    d = Path(d)
+                    if not d.is_absolute():
+                        d = root_directory / d
+                    d = d.resolve()
+                    try:
+                        d.relative_to(root_directory)
+                    except ValueError:
+                        logger.warning(f"Skipping {d}: not under {root_directory}")
+                        continue
+                    if not d.is_dir():
+                        logger.warning(f"Skipping {d}: not a directory")
+                        continue
+                    update_single_directory(d)
+            else:
+                walker = FIFODirectoryWalker(self.follow_symlinks, self.exclude_patterns)
+                walker.walk_and_process(root_directory, update_single_directory, recursive)
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"Update complete: {totals['dirs']} dirs in {elapsed:.2f}s -- "
+            f"{totals['unchanged']} unchanged, {totals['rehashed']} rehashed, "
+            f"{totals['added']} added, {totals['removed']} removed, "
+            f"{totals['rewritten']} manifests rewritten, {totals['failed']} failed")
+        return totals
 
     def verify_checksums_in_directory(self, directory: Path) -> Dict[str, Any]:
         """Verify checksums in a directory against its .shasum file."""
@@ -2334,16 +2620,8 @@ class ChecksumGenerator:
         }
 
         # Read existing checksums
-        stored_checksums = {}
         try:
-            with open(shasum_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        parts = line.split('  ', 1)
-                        if len(parts) == 2:
-                            hash_value, filename = parts
-                            stored_checksums[filename] = hash_value.lower()
+            stored_checksums = parse_shasum_file(shasum_path)
         except Exception as e:
             return {'error': f"Error reading {shasum_path}: {e}"}
 
@@ -2495,7 +2773,12 @@ class ChecksumGenerator:
                              verify_only=False, update_mode=False):
         """Process an entire directory tree."""
         global grand_totals
-        
+
+        if update_mode:
+            # Incremental update path (see run_update). Historically this
+            # parameter was accepted but ignored, silently doing a full create.
+            return self.run_update(root_directory, recursive=recursive)
+
         if not root_directory.exists():
             logger.error(f"Directory does not exist: {root_directory}")
             return
@@ -2589,7 +2872,7 @@ class ChecksumGenerator:
 
             monolithic_writer = MonolithicWriter(output_path, root_directory, self.algorithm, self.resume_mode, self.yes_to_all)
 
-        walker = FIFODirectoryWalker(self.follow_symlinks)
+        walker = FIFODirectoryWalker(self.follow_symlinks, self.exclude_patterns)
 
         def process_single_directory(directory: Path):
             # Skip directory if in resume mode and already processed
@@ -2920,6 +3203,7 @@ class DetailedHelpAction(argparse.Action):
             'verify': self._verify_help,
             'shadow': self._shadow_help,
             'resume': self._resume_help,
+            'update': self._update_help,
             'examples': self._examples_help
         }
         
@@ -2955,6 +3239,7 @@ DETAILED HELP:
     dazzlesum --detailed-help verify    # Help for verification options
     dazzlesum --detailed-help shadow    # Help for shadow directories
     dazzlesum --detailed-help resume    # Help for --resume feature
+    dazzlesum --detailed-help update    # Help for incremental updates
     dazzlesum --detailed-help examples  # Comprehensive examples
 
 For complete argument list, use: dazzlesum --help
@@ -3215,7 +3500,55 @@ LIMITATIONS:
 
 NOTE: Very large operations (millions of files) benefit most from resume capability
         """)
-    
+
+    def _update_help(self):
+        print("""
+UPDATE -- INCREMENTAL CHECKSUM UPDATES
+
+    dazzlesum update -r [directory]     # Rehash only what changed
+
+HOW IT WORKS:
+    A per-machine state cache (.dazzle-cache.sqlite at the shadow root, or the
+    target root without --shadow-dir) records (size, mtime) per file at last
+    hash. A file is rehashed only when its current stat differs from the
+    recorded state -- an EQUALITY check, so content synced in with an OLDER
+    mtime (e.g. Resilio preserving origin timestamps) is still detected.
+
+    .shasum manifests are rewritten ONLY when their content actually changed;
+    unchanged manifests stay byte-identical (no git churn).
+
+    The cache is a disposable accelerator, never part of the record. Do NOT
+    sync or commit it -- stat state is only meaningful on the machine that
+    recorded it. Delete it freely; --bootstrap rebuilds it.
+
+SEMANTICS PER FILE:
+    unchanged  stat matches cache        -> keep hash, no I/O
+    changed    stat differs              -> rehash, update manifest entry
+    added      not in manifest           -> hash, add entry
+    deleted    in manifest, not on disk  -> drop entry (or --keep-missing)
+
+KEY OPTIONS:
+    --bootstrap hash|trust   Manifest entries with no cached state:
+                             'hash' re-verifies them (default);
+                             'trust' seeds the cache from current stats +
+                             stored hashes without rehashing (fast bootstrap
+                             against a freshly generated manifest)
+    --dirs-from FILE|-       Update only listed folders (one per line,
+                             relative to target; '-' = stdin). External
+                             change detectors (git hooks, filesystem
+                             watchers) feed suspect folders through this.
+    --paranoid               Ignore cache, rehash everything
+    --keep-missing           Keep entries for files no longer on disk
+
+EXAMPLES:
+    dazzlesum update -r --shadow-dir /checksums /data     # library sweep
+    git diff --name-only | xargs -n1 dirname | sort -u | \\
+        dazzlesum update -r --dirs-from - /data           # hint-driven
+
+EXIT CODES:
+    0 success, 1 fatal error, 2 completed with per-file failures
+        """)
+
     def _examples_help(self):
         print("""
 COMPREHENSIVE EXAMPLES
@@ -3544,13 +3877,28 @@ For comprehensive examples: %(prog)s examples
     # UPDATE subcommand
     update_parser = subparsers.add_parser('update', parents=[parent],
                                          help='Update existing checksums',
-                                         description='Update checksums for changed files')
+                                         description='Incrementally update checksums, rehashing only changed files')
     update_parser.add_argument('--include', action='append', metavar='PATTERN',
                               help='Include files matching pattern (can be used multiple times)')
     update_parser.add_argument('--exclude', action='append', metavar='PATTERN',
                               help='Exclude files matching pattern (can be used multiple times)')
     update_parser.add_argument('--log', metavar='FILE',
                               help='Write detailed log to file')
+    update_parser.add_argument('--dirs-from', metavar='FILE',
+                              help='Update only the folders listed in FILE (one per line, '
+                                   "relative to the target directory; '-' reads stdin). "
+                                   'Lets external change detectors (git hooks, USN watchers) '
+                                   'nominate suspect folders.')
+    update_parser.add_argument('--bootstrap', choices=['hash', 'trust'], default='hash',
+                              help='How to treat manifest entries with no cached state: '
+                                   "'hash' rehashes them (default, verifying); 'trust' seeds "
+                                   'the cache from current file stats + stored hashes without '
+                                   'rehashing (fast; only sound against a freshly generated manifest)')
+    update_parser.add_argument('--paranoid', action='store_true',
+                              help='Ignore the state cache and rehash every file '
+                                   '(still applies add/remove semantics)')
+    update_parser.add_argument('--keep-missing', action='store_true',
+                              help='Keep manifest entries whose files no longer exist on disk')
     
     # MANAGE subcommand
     manage_parser = subparsers.add_parser('manage', parents=[parent],
@@ -3907,7 +4255,7 @@ def execute_verify_action(args, directory):
     return 0
 
 def execute_update_action(args, directory):
-    """Execute update action."""
+    """Execute update action (incremental: rehash only changed files)."""
     # Set up generator for update mode
     generator = ChecksumGenerator(
         algorithm=args.algorithm,
@@ -3922,15 +4270,55 @@ def execute_update_action(args, directory):
         shadow_dir=args.shadow_dir,
         yes_to_all=args.yes
     )
-    
+
     # Force Python implementation if requested
     if args.force_python:
         generator.calculator.native_tool = None
         logger.info("Forcing Python implementation")
-    
-    # Process directory tree in update mode
-    generator.process_directory_tree(directory, recursive=args.recursive, update_mode=True)
-    return 0
+
+    # Optional folder list from an external change-detection source
+    dirs = None
+    dirs_from = getattr(args, 'dirs_from', None)
+    if dirs_from:
+        try:
+            if dirs_from == '-':
+                # Read stdin as BYTES and decode utf-8-sig: PowerShell pipes
+                # prepend a UTF-8 BOM (EF BB BF), and Python's default cp1252
+                # stdin decoding mangles it into three junk chars that silently
+                # corrupt the first folder name. utf-8-sig eats the BOM bytes.
+                if hasattr(sys.stdin, 'buffer'):
+                    raw = sys.stdin.buffer.read()
+                    try:
+                        text = raw.decode('utf-8-sig')
+                    except UnicodeDecodeError:
+                        text = raw.decode(sys.stdin.encoding or 'utf-8',
+                                          errors='replace')
+                else:  # e.g. io.StringIO in tests
+                    text = sys.stdin.read()
+                lines = text.splitlines()
+            else:
+                # utf-8-sig: tolerate a BOM from Windows editors
+                with open(dirs_from, 'r', encoding='utf-8-sig') as f:
+                    lines = f.read().splitlines()
+        except OSError as e:
+            logger.error(f"Cannot read --dirs-from {dirs_from}: {e}")
+            return 1
+        # Per-line BOM strip as defense in depth (text-mode stdin sources)
+        dirs = [line.strip().strip('\ufeff').strip() for line in lines]
+        dirs = [line for line in dirs if line and not line.startswith('#')]
+        if not dirs:
+            logger.info("--dirs-from list is empty; nothing to update")
+            return 0
+
+    totals = generator.run_update(
+        directory,
+        recursive=args.recursive,
+        dirs=dirs,
+        bootstrap=getattr(args, 'bootstrap', 'hash'),
+        paranoid=getattr(args, 'paranoid', False),
+        keep_missing=getattr(args, 'keep_missing', False),
+    )
+    return 0 if totals and totals.get('failed', 0) == 0 else (1 if not totals else 2)
 
 def execute_manage_action(args, directory):
     """Execute manage action."""

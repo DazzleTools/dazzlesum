@@ -75,8 +75,11 @@ class TestCLIInterface(unittest.TestCase):
     def test_update_subcommand_help(self):
         """Test update subcommand help."""
         result = self.run_dazzlesum(["update", "--help"])
-        self.assertIn("Update checksums", result.stdout)
+        self.assertIn("Incrementally update checksums", result.stdout)
         self.assertIn("--include", result.stdout)
+        self.assertIn("--bootstrap", result.stdout)
+        self.assertIn("--dirs-from", result.stdout)
+        self.assertIn("--paranoid", result.stdout)
     
     def test_manage_subcommand_help(self):
         """Test manage subcommand help."""
