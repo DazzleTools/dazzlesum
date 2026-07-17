@@ -33,10 +33,10 @@ classifiers = [
 requires-python = ">=3.7"
 
 [project.urls]
-Homepage = "https://github.com/djdarcy/dazzlesum"
-"Bug Reports" = "https://github.com/djdarcy/dazzlesum/issues"
-"Source" = "https://github.com/djdarcy/dazzlesum"
-"Documentation" = "https://github.com/djdarcy/dazzlesum#readme"
+Homepage = "https://github.com/DazzleTools/dazzlesum"
+"Bug Reports" = "https://github.com/DazzleTools/dazzlesum/issues"
+"Source" = "https://github.com/DazzleTools/dazzlesum"
+"Documentation" = "https://github.com/DazzleTools/dazzlesum#readme"
 
 [project.scripts]
 dazzlesum = "dazzlesum:main"

@@ -48,7 +48,7 @@ setup(
     long_description_content_type="text/markdown",
     author="Dustin Darcy",
     author_email="6962246+djdarcy@users.noreply.github.com",
-    url="https://github.com/djdarcy/dazzlesum",
+    url="https://github.com/DazzleTools/dazzlesum",
     py_modules=["dazzlesum"],
     entry_points={
         "console_scripts": [
@@ -93,8 +93,8 @@ setup(
     keywords="checksum hash verification sha256 cross-platform dos-compatible",
     python_requires=">=3.7",
     project_urls={
-        "Bug Reports": "https://github.com/djdarcy/dazzlesum/issues",
-        "Source": "https://github.com/djdarcy/dazzlesum",
-        "Documentation": "https://github.com/djdarcy/dazzlesum#readme",
+        "Bug Reports": "https://github.com/DazzleTools/dazzlesum/issues",
+        "Source": "https://github.com/DazzleTools/dazzlesum",
+        "Documentation": "https://github.com/DazzleTools/dazzlesum#readme",
     },
 )
