@@ -25,18 +25,21 @@ class TestVersioningSystem(unittest.TestCase):
         self.assertIsInstance(version, str)
         
         if '_' in version:
-            # Static build: 1.3.0_36-20250629-2109774a
-            base, build_info = version.split('_', 1)
-            
+            # Repokit-stamped build: 1.4.2_main_85-20260717-9310051e
+            # (BASE_BRANCH_BUILD-YYYYMMDD-HASH; parse from the right so
+            # branch names containing separators stay safe)
+            prefix, build_info = version.rsplit('_', 1)
+            base = prefix.split('_', 1)[0]
+
             # Base version should be semantic
             parts = base.split('.')
             self.assertEqual(len(parts), 3)
             for part in parts:
                 self.assertTrue(part.isdigit())
-            
+
             # Build info should match pattern: Build#-YYYYMMDD-CommitHash
             self.assertRegex(build_info, r'^\d+-\d{8}-[a-f0-9]{8}[a-f0-9]*$')
-            
+
             # Should NOT end with -dev for static builds
             self.assertFalse(build_info.endswith('-dev'))
         else:
@@ -70,8 +73,10 @@ class TestVersioningSystem(unittest.TestCase):
         version = dazzlesum.__version__
         
         if '_' in version:
-            base_version, build_info = version.split('_', 1)
-            
+            # BASE_BRANCH_BUILD-YYYYMMDD-HASH -- build info is the last
+            # '_'-separated token
+            base_version, build_info = version.rsplit('_', 1)
+
             # Should be able to extract build number
             build_parts = build_info.split('-')
             build_number = build_parts[0]

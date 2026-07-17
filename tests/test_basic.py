@@ -40,10 +40,13 @@ class TestBasicFunctionality(unittest.TestCase):
         version = dazzlesum.__version__
         self.assertIsInstance(version, str)
         self.assertTrue(len(version) > 0)
-        # Should be in format like "1.3.0" or "1.3.0_33-20250629-9938568e-dev"
+        # Should be "1.4.2" or the repokit-stamped form
+        # "1.4.2_main_85-20260717-9310051e" (BASE_BRANCH_BUILD-YYYYMMDD-HASH)
         if '_' in version:
-            # Development or CI build format
-            base_version, build_info = version.split('_', 1)
+            # Stamped build format; parse from the right so branch names
+            # containing '-' or '_' stay safe
+            prefix, build_info = version.rsplit('_', 1)
+            base_version = prefix.split('_', 1)[0]
             parts = base_version.split('.')
             self.assertGreaterEqual(len(parts), 3)
             # Check build info format: Build#-YYYYMMDD-CommitHash[-dev]
