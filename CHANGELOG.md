@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.4.4] - 2026-07-17
+
+### Fixed
+- Silent mode (-6 / `-qqqqqq`) was unreachable: verbosity clamped to -5 at all three parse sites while `is_silent()` tested `<= -6`, so "silent" runs still printed the banner and grand totals
+- Silent mode returned exit code 0 regardless of verification failures: the aggregate exit code was computed as a side effect of *displaying* grand totals, which silent mode skipped; `finalize_exit_code()` now runs unconditionally (silent mode is exit-codes-only, not exit-code-less)
+- Level -1 hid extras-only directory status lines, contradicting its documented "EXTRA + MISSING + FAIL" semantics (`EXTRA_SUMMARY` was baked into the level's defaults; it remains available as an explicit `--squelch` category)
+- Directories whose only issues were all squelched still displayed when they had zero verified files (extras-only dirs paradoxically appeared at MORE-squelched levels)
+- Verbosity disclosure is now cumulative: levels -3 and -2 keep -4's `FORCE_SUMMARY` status lines, so raising verbosity can no longer remove information
+- `--squelch` categories absent from the active level's default squelch dict were silently ignored (e.g. `--squelch EXTRA_SUMMARY` no-op'd at most levels); explicit categories now always apply. Found by the v1.4.4 human test checklist.
+- Test suite fully green for the first time since v1.3.6: the two remaining test failures were filter bugs counting the grand-totals `Files:` summary line (added in v1.3.6) as a per-directory status line
+
 ## [1.4.3] - 2026-07-17
 
 ### Performance

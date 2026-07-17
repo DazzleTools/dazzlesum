@@ -50,10 +50,10 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 # (component-per-line form is what its parser expects)
 MAJOR = 1
 MINOR = 4
-PATCH = 3
+PATCH = 4
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.4.3_main_87-20260717-ad32e1cf"
+__version__ = "1.4.4_main_88-20260717-48cdbeab"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""
@@ -421,8 +421,8 @@ class VerbosityConfig:
         if env_verbosity:
             try:
                 level = int(env_verbosity)
-                # Clamp to reasonable range
-                level = max(-5, min(4, level))
+                # Clamp to valid range (-6 = silent mode is the floor)
+                level = max(-6, min(4, level))
                 return cls(level=level)
             except ValueError:
                 # Invalid value, use default
@@ -437,12 +437,12 @@ class VerbosityConfig:
         
         # Handle explicit --verbosity flag
         if hasattr(args, 'verbosity') and args.verbosity is not None:
-            level = max(-5, min(4, args.verbosity))
+            level = max(-6, min(4, args.verbosity))
             return cls(level=level, quiet_count=quiet_count, verbose_count=verbose_count)
         
         # Calculate level from -q/-v counts: base + verbose - quiet
         level = verbose_count - quiet_count
-        level = max(-5, min(4, level))  # Clamp to valid range
+        level = max(-6, min(4, level))  # Clamp to valid range (-6 = silent floor)
         
         return cls(level=level, quiet_count=quiet_count, verbose_count=verbose_count)
     
@@ -457,9 +457,9 @@ class VerbosityConfig:
             -6: {'show_output': False},  # Special case: no output at all, only exit codes
             -5: {'INFO': True,  'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': True},   # Only grand total summary  # noqa: E241
             -4: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': False, 'FORCE_SUMMARY': True},  # info/status line + grand total  # noqa: E241
-            -3: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': False, 'SUMMARY': False},  # FAIL + info/status + grand total  # noqa: E241
-            -2: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # MISSING + FAIL + info/status + grand total  # noqa: E241
-            -1: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False, 'EXTRA_SUMMARY': True},  # EXTRA + MISSING + FAIL + info/status + grand total  # noqa: E241
+            -3: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': False, 'SUMMARY': False, 'FORCE_SUMMARY': True},  # FAIL + info/status + grand total (cumulative: keeps -4's status lines)  # noqa: E241
+            -2: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': False, 'FAILS': False, 'SUMMARY': False, 'FORCE_SUMMARY': True},  # MISSING + FAIL + info/status + grand total (cumulative)  # noqa: E241
+            -1: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # EXTRA + MISSING + FAIL + info/status + grand total (EXTRA_SUMMARY stays a --squelch opt-in, not a level default)  # noqa: E241
              0: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # Current default  # noqa: E241,E131
             +1: {'INFO': False, 'SUCCESS': False, 'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # Show everything
             # +2 and above: controlled by logger verbosity, not squelch
@@ -495,9 +495,9 @@ def initialize_squelch_from_verbosity(verbosity_level):
             -6: {'show_output': False},
             -5: {'INFO': True,  'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': True},  # noqa: E241
             -4: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': True,  'SUMMARY': False, 'FORCE_SUMMARY': True},  # noqa: E241
-            -3: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': False, 'SUMMARY': False},  # noqa: E241
-            -2: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # noqa: E241
-            -1: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False, 'EXTRA_SUMMARY': True},  # noqa: E241
+            -3: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': True,  'FAILS': False, 'SUMMARY': False, 'FORCE_SUMMARY': True},  # noqa: E241
+            -2: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': True,  'MISSING': False, 'FAILS': False, 'SUMMARY': False, 'FORCE_SUMMARY': True},  # noqa: E241
+            -1: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': True,  'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # noqa: E241
              0: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # noqa: E241,E131
             +1: {'INFO': False, 'SUCCESS': False, 'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},
         }
@@ -601,6 +601,24 @@ class GrandTotals:
             return round(total_files / processing_time)
         return 0
     
+    def finalize_exit_code(self):
+        """Compute the aggregate verification exit code and set the global.
+
+        Kept separate from display_grand_totals() so silent mode (-6, exit
+        codes only) still produces the correct exit code -- historically the
+        code was set as a side effect of displaying, so skipping the display
+        silently reported success regardless of failures.
+        """
+        status_text, exit_code, _, _ = calculate_verification_status(
+            self.files_verified, self.files_failed, self.files_missing, self.files_extra
+        )
+        global verification_exit_code
+        # For recursive operations, the grand totals exit code should override
+        # individual directory codes: overall repository health, not the worst
+        # individual directory.
+        verification_exit_code = exit_code
+        return status_text, exit_code
+
     def display_grand_totals(self):
         """Display the grand totals summary."""
         global verbosity_config  # noqa: F824
@@ -617,17 +635,9 @@ class GrandTotals:
         processing_time = self.get_processing_time()
         throughput = self.get_throughput()
         
-        # Determine overall status using same logic as individual directories
-        status_text, exit_code, _, _ = calculate_verification_status(
-            self.files_verified, self.files_failed, self.files_missing, self.files_extra
-        )
-        
-        # Update global exit code
-        global verification_exit_code
-        # For recursive operations, the grand totals exit code should override individual directory codes
-        # This ensures the exit code reflects overall repository health, not worst individual directory
-        verification_exit_code = exit_code
-        
+        # Determine overall status (also sets the global exit code)
+        status_text, exit_code = self.finalize_exit_code()
+
         # Display header
         dazzle_logger.info("", level=0)  # Blank line
         if color_formatter:
@@ -3036,6 +3046,9 @@ class ChecksumGenerator:
         # Display grand totals for recursive verification
         if verify_only and recursive and grand_totals:
             grand_totals.end_timing()
+            # Exit code must be finalized even when silent mode suppresses
+            # the display -- silent mode is exit-codes-only, not exit-code-less
+            grand_totals.finalize_exit_code()
             # Check for silent mode (-6) - no output at all
             if not (verbosity_config and verbosity_config.is_silent()):
                 grand_totals.display_grand_totals()
@@ -3226,7 +3239,11 @@ class ChecksumGenerator:
                 
                 # If directory has no displayed issues, don't show status line (unless show_all is True or auto-detected)
                 # For auto-detected commands, always show the summary even for pure SUCCESS
-                if not has_displayed_fails and not has_displayed_missing and not has_displayed_extra and verified_count > 0 and not show_all and not is_auto_detected_command:
+                # Note: no verified_count requirement -- a directory whose ONLY
+                # issues are all squelched must hide too (e.g. extras-only dir
+                # with 0 verified at level -2), otherwise squelched levels
+                # paradoxically show MORE than less-squelched ones.
+                if not has_displayed_fails and not has_displayed_missing and not has_displayed_extra and not show_all and not is_auto_detected_command:
                     should_display = False
                 # Special case: if directory only has EXTRA files and EXTRA_SUMMARY is squelched, hide status line
                 elif (has_displayed_extra and not has_displayed_fails and not has_displayed_missing and 
@@ -4344,8 +4361,10 @@ def execute_verify_action(args, directory):
     if hasattr(args, 'squelch') and args.squelch and squelch_settings:
         squelch_categories = [cat.strip().upper() for cat in args.squelch.split(',')]
         for category in squelch_categories:
-            if category in squelch_settings:
-                squelch_settings[category] = True
+            # Set unconditionally: requiring the key to pre-exist in the
+            # level's default dict silently no-op'd any category absent from
+            # that level's defaults (e.g. --squelch EXTRA_SUMMARY).
+            squelch_settings[category] = True
     
     # Process directory tree in verify mode
     generator.process_directory_tree(directory, recursive=args.recursive, verify_only=True)

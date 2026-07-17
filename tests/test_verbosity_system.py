@@ -126,8 +126,12 @@ class TestVerbosityLevels:
         # Should have startup message + grand totals
         assert any("GRAND TOTALS" in line for line in lines)
         
-        # Should NOT have individual directory status lines
-        status_lines = [line for line in lines if ': ' in line and 'verified' in line]
+        # Should NOT have individual directory status lines. The grand-totals
+        # block's own "Files: N verified, ..." summary line (added in v1.3.6)
+        # is not a per-directory line and must not count.
+        status_lines = [line for line in lines
+                        if ': ' in line and 'verified' in line
+                        and not line.strip().startswith('Files:')]
         assert len(status_lines) == 0
     
     def test_level_minus_4_force_summary(self, comprehensive_test_directory):
@@ -223,7 +227,11 @@ class TestVerbosityProgression:
         for level in [-5, -4, -3, -2, -1, 0, 1]:
             exit_code, stdout, stderr = run_dazzlesum_with_level(comprehensive_test_directory, level)
             all_output = stdout + stderr
-            status_lines = [line for line in all_output.split('\n') if ': ' in line and 'verified' in line]
+            # Exclude the grand-totals "Files: ..." summary line (v1.3.6);
+            # only per-directory status lines measure disclosure here
+            status_lines = [line for line in all_output.split('\n')
+                            if ': ' in line and 'verified' in line
+                            and not line.strip().startswith('Files:')]
             results[level] = len(status_lines)
         
         # Each level should show same or more information than more restrictive levels
@@ -233,6 +241,24 @@ class TestVerbosityProgression:
         assert results[-1] >= results[-2]  # -1 shows more than -2
         assert results[0] >= results[-1]   # 0 shows more than -1
         assert results[1] >= results[0]    # 1 shows more than 0
+
+class TestExplicitSquelchOverrides:
+    """Regression (v1.4.4): --squelch only modified keys already present in
+    the level's default dict, so categories absent from a level's defaults
+    (e.g. EXTRA_SUMMARY at most levels) silently no-op'd."""
+
+    def test_squelch_extra_summary_hides_pure_extras_dir(self, comprehensive_test_directory):
+        cmd = [sys.executable, str(project_root / "dazzlesum.py"), "verify", "-r",
+               "-q", "--squelch", "EXTRA_SUMMARY", str(comprehensive_test_directory)]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        all_output = result.stdout + result.stderr
+        extra_only_lines = [line for line in all_output.split('\n')
+                            if 'extra_only' in line and 'verified' in line]
+        assert len(extra_only_lines) == 0, extra_only_lines
+        # Failing dirs must still be visible
+        assert any('fail_only' in line and 'verified' in line
+                   for line in all_output.split('\n'))
+
 
 class TestSuccessWithExtrasFiltering:
     """Specific tests for SUCCESS directories with extra files."""
