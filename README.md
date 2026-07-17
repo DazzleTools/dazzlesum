@@ -73,6 +73,14 @@ Other potential dependencies down the line:
 pip install -e ".[dev,test,docs]"
 ```
 
+### Standalone (no install)
+
+`dazzlesum.py` is a single self-contained file with no dependencies beyond the Python standard library. Copy it anywhere and run it directly:
+
+```bash
+python dazzlesum.py --help
+```
+
 ## Quick Start
 
 ### Generate checksums (using new subcommand syntax)

@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update statistics report: unchanged / rehashed / added / removed / manifests rewritten / failed
 - `dazzlesum --detailed-help update` topic documenting incremental semantics
 - Module-level `parse_shasum_file()` shared by verify and update paths
+- PyPI publishing workflow (`.github/workflows/publish.yml`): building a GitHub Release triggers an automatic upload via trusted publishing (OIDC, no stored tokens); manual dispatch and local `twine upload` remain available
+- `scripts/check_dist_no_leak.py`: refuses to publish any artifact containing `private/` paths or local state files (depth-proof component matching)
+- README: documented the standalone no-install path (copy `dazzlesum.py`, run directly)
 
 ### Fixed
 - `--exclude` patterns now prune directory TRAVERSAL, not just file matching: the walker previously descended into excluded directories (`.git`, `.private`, `.sync`, ...) and checksummed all their contents, because files inside an excluded directory don't themselves match the directory's pattern (v1.3.6 fixed this for the progress counter but not for the walk itself)
