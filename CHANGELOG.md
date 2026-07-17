@@ -10,8 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.4.0] - 2026-07-17
+
+### Added
+- Incremental update mode: `dazzlesum update` now rehashes only changed files instead of silently performing a full create (the `update_mode` parameter was previously dead code)
+- Per-machine SQLite state cache (`.dazzle-cache.sqlite` at the shadow root, or target root without `--shadow-dir`) recording (size, mtime_ns) per file at last hash; disposable accelerator, never part of the checksum record -- do not sync or commit it
+- Change detection by stat EQUALITY against recorded state (not "mtime newer"), so content synced in with older origin mtimes (e.g. Resilio Sync) is still detected
+- `update --dirs-from FILE|-` to update only nominated folders, letting external change detectors (git hooks, filesystem watchers) drive incremental work
+- `update --bootstrap {hash,trust}` for manifest trees with no cache: re-verify (default) or seed the cache from existing manifests without rehashing
+- `update --paranoid` (ignore cache, rehash everything) and `update --keep-missing` (retain manifest entries for deleted files)
+- Update statistics report: unchanged / rehashed / added / removed / manifests rewritten / failed
+- `dazzlesum --detailed-help update` topic documenting incremental semantics
+- Module-level `parse_shasum_file()` shared by verify and update paths
+- PyPI publishing workflow (`.github/workflows/publish.yml`): building a GitHub Release triggers an automatic upload via trusted publishing (OIDC, no stored tokens); manual dispatch and local `twine upload` remain available
+- `scripts/check_dist_no_leak.py`: refuses to publish any artifact containing `private/` paths or local state files (depth-proof component matching)
+- README: documented the standalone no-install path (copy `dazzlesum.py`, run directly)
+
+### Fixed
+- `--exclude` patterns now prune directory TRAVERSAL, not just file matching: the walker previously descended into excluded directories (`.git`, `.private`, `.sync`, ...) and checksummed all their contents, because files inside an excluded directory don't themselves match the directory's pattern (v1.3.6 fixed this for the progress counter but not for the walk itself)
+- Windows junction detection no longer spawns a `dir /AL` subprocess per NON-junction directory (~60ms per folder -- hours of pure process creation on large trees); detection is now a pure lstat reparse-point check
+- Directories reached through a junction ancestor are no longer misclassified as junctions (the old `resolve() != path` heuristic flagged every such directory, silently skipping whole trees when links weren't followed)
+- `--dirs-from` input is now BOM-tolerant: PowerShell pipes prepend a UTF-8 BOM to stdin (and Windows editors to files), which silently corrupted the first folder name into a nonexistent path
+
 ### Changed
-- Future changes will be listed here
+- `.shasum` writes are now atomic (temp file + rename), so an interrupted run never leaves a truncated manifest
+- Update rewrites a `.shasum` file only when its checksum content actually changed; unchanged manifests stay byte-identical (no version-control churn)
+- External edits to a manifest (stored hash disagreeing with the state cache) trigger a rehash to re-establish truth
 
 ## [1.3.6] - 2026-04-07
 

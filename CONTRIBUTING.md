@@ -1,4 +1,4 @@
-# Contributing to Dazzlesum
+﻿# Contributing to Dazzlesum
 
 Thank you for considering contributing to Dazzlesum! This cross-platform checksum utility benefits from community contributions.
 
@@ -19,14 +19,14 @@ When reporting bugs, please include:
 5. **File Structure**: If relevant, describe the directory structure being processed
 6. **Error Output**: Full error messages and stack traces
 
-Use our [bug report template](https://github.com/djdarcy/dazzlesum/issues/new?template=bug-report.md) to ensure you include all necessary information.
+Use our [bug report template](https://github.com/DazzleTools/dazzlesum/issues/new?template=bug-report.md) to ensure you include all necessary information.
 
 ### Suggesting Enhancements
 
 Enhancement suggestions are welcome! Please:
 
 1. Check existing issues to avoid duplicates
-2. Use our [feature request template](https://github.com/djdarcy/dazzlesum/issues/new?template=feature-request.md)
+2. Use our [feature request template](https://github.com/DazzleTools/dazzlesum/issues/new?template=feature-request.md)
 3. Describe the use case and expected behavior
 4. Consider cross-platform compatibility (Windows, macOS, Linux)
 5. Think about DOS shell compatibility requirements
@@ -97,7 +97,7 @@ This project uses a simple branch strategy:
 
 This is a core requirement:
 - Use ASCII characters only in output
-- Avoid Unicode symbols (✓, ❌, etc.)
+- Avoid Unicode symbols (âœ“, âŒ, etc.)
 - Support Windows command prompt and PowerShell
 - Handle Windows path separators correctly
 
@@ -110,7 +110,7 @@ This is a core requirement:
 
 ## Getting Help
 
-- **Questions**: Use [GitHub Discussions](https://github.com/djdarcy/dazzlesum/discussions)
+- **Questions**: Use [GitHub Discussions](https://github.com/DazzleTools/dazzlesum/discussions)
 - **Documentation**: Check the [README](README.md) and [docs/](docs/) folder
 - **Issues**: Search existing issues before creating new ones
 

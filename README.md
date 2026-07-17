@@ -1,9 +1,11 @@
 # Dazzlesum
 
-[![GitHub Workflow Status](https://github.com/djdarcy/dazzlesum/actions/workflows/python.yml/badge.svg)](https://github.com/djdarcy/dazzlesum/actions)
-[![Version](https://img.shields.io/badge/version-1.3.6-blue.svg)](https://github.com/djdarcy/dazzlesum/releases/tag/v1.3.6)
-[![Python Version](https://img.shields.io/badge/python-%3E%3D3.7-brightgreen)](https://python.org)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![CI](https://github.com/DazzleTools/dazzlesum/actions/workflows/python.yml/badge.svg)](https://github.com/DazzleTools/dazzlesum/actions)
+[![PyPI](https://img.shields.io/pypi/v/dazzlesum?color=green)](https://pypi.org/project/dazzlesum/)
+[![Release Date](https://img.shields.io/github/release-date/DazzleTools/dazzlesum?color=green)](https://github.com/DazzleTools/dazzlesum/releases)
+[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3-green.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20BSD-lightgrey.svg)](#installation)
 
 Dazzlesum is a handy checksum tool designed for data integrity verification across different machines and operating systems. It generates folder-specific checksum files (`.shasum`) that enable verification of file collections, with special attention to DOS shell compatibility and cross-platform consistency.
 
@@ -58,7 +60,7 @@ pip install dazzlesum
 ### Manual Installation
 
 ```bash
-git clone https://github.com/djdarcy/dazzlesum.git
+git clone https://github.com/DazzleTools/dazzlesum.git
 cd dazzlesum
 pip install -e .
 ```
@@ -71,6 +73,14 @@ pip install -e ".[windows]"
 Other potential dependencies down the line:
 ```bash
 pip install -e ".[dev,test,docs]"
+```
+
+### Standalone (no install)
+
+`dazzlesum.py` is a single self-contained file with no dependencies beyond the Python standard library. Copy it anywhere and run it directly:
+
+```bash
+python dazzlesum.py --help
 ```
 
 ## Quick Start
@@ -203,7 +213,7 @@ dazzlesum shadow      # Shadow directory help
 
 ## Contributing
 
-Contributions are welcome! Issues, suggestions, and bug reports are all appreciated. Please open an [issue](https://github.com/djdarcy/dazzlesum/issues) if you find something that can be improved. Or: 
+Contributions are welcome! Issues, suggestions, and bug reports are all appreciated. Please open an [issue](https://github.com/DazzleTools/dazzlesum/issues) if you find something that can be improved. Or: 
 
 1. Fork this repository and clone a fork.
 2. Make changes on a new branch (e.g., `feature/new_thing`).
@@ -225,8 +235,8 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/djdarcy/dazzlesum/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/djdarcy/dazzlesum/discussions)
+- **Issues**: [GitHub Issues](https://github.com/DazzleTools/dazzlesum/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/DazzleTools/dazzlesum/discussions)
 - **Documentation**: Check the [docs/](docs/) folder for additional guides
 
 ---
