@@ -24,6 +24,8 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
+from dazzle_filekit.paths import compute_relative_path
+
 from ._version import __version__
 from .constants import logger, is_windows, SHASUM_FILENAME
 from . import state
@@ -339,16 +341,17 @@ class MonolithicWriter:
 
         try:
             for filename, checksum_info in sorted(checksums.items()):
-                # Calculate relative path from root
+                # Calculate relative path from root: filekit's
+                # compute_relative_path is exactly the relpath-with-
+                # absolute-fallback-on-cross-drive contract this inlined.
                 file_path = directory / filename
-                try:
-                    relative_path = os.path.relpath(file_path, self.root_path)
+                relative_path = compute_relative_path(file_path, self.root_path)
+                if os.path.isabs(relative_path):
+                    # Cross-drive (Windows): fell back to the absolute path
+                    logger.warning(f"Could not create relative path for {file_path}, using absolute path")
+                else:
                     # Use forward slashes for cross-platform compatibility
                     relative_path = relative_path.replace('\\', '/')
-                except ValueError:
-                    # Handle cases where paths are on different drives (Windows)
-                    relative_path = str(file_path)
-                    logger.warning(f"Could not create relative path for {file_path}, using absolute path")
 
                 # Write in standard format: hash  filename
                 self.file_handle.write(f"{checksum_info['hash']}  {relative_path}\n")

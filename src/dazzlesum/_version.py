@@ -13,10 +13,10 @@ MAJOR = 1
 MINOR = 5
 PATCH = 0
 PHASE = "alpha"  # Per-MINOR feature set: None, "alpha", "beta", "rc1", etc.
-PRE_RELEASE_NUM = 4
+PRE_RELEASE_NUM = 5
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0-alpha_phase1-src-split_95-20260717-493bbb1b"
+__version__ = "1.5.0-alpha_phase1-src-split_96-20260717-b4a1c5f2"
 
 
 def get_package_version():

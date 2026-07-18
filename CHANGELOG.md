@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.5.0-alpha.5] - 2026-07-17
+
+### Changed
+- Monolithic-file relative paths are computed via filekit `paths.compute_relative_path` (relpath with absolute-path fallback on cross-drive `ValueError` -- the exact contract previously inlined); the cross-drive warning is preserved
+
 ## [1.5.0-alpha.4] - 2026-07-17
 
 ### Changed

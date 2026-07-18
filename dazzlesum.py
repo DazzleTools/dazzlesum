@@ -74,6 +74,45 @@ state = sys.modules[__name__]
 # ===========================================================================
 
 
+# ---- vendored: dazzle_filekit.paths.compute_relative_path (dazzle-filekit 0.3.2) ----
+def compute_relative_path(
+    target: Union[str, Path],
+    start: Union[str, Path],
+    fallback_to_absolute: bool = True
+) -> Optional[str]:
+    """
+    Compute the relative path FROM ``start`` TO ``target`` via os.path.relpath.
+
+    This is the ``..``-traversing relative path between two arbitrary locations --
+    the operation needed to store a link's target relative to the link's own
+    directory. It is distinct from :func:`get_relative_path`, which uses
+    ``Path.relative_to`` and only succeeds when ``target`` is a *subpath* of
+    ``start`` (returning None for siblings). For example, with
+    target ``/a/b/c`` and start ``/a/x``:
+
+    * ``compute_relative_path`` -> ``"../b/c"``
+    * ``get_relative_path``     -> ``None`` (not a subpath)
+
+    Args:
+        target: The path being pointed at.
+        start: The reference location, typically the link's parent directory.
+        fallback_to_absolute: On a cross-drive ValueError (Windows), return the
+            absolute target instead of None.
+
+    Returns:
+        The relative path as a string, the absolute target on a cross-drive
+        fallback, or None.
+    """
+    target_abs = os.path.abspath(str(target))
+    start_abs = os.path.abspath(str(start))
+    try:
+        return os.path.relpath(target_abs, start_abs)
+    except ValueError:
+        # os.path.relpath raises ValueError across drives on Windows.
+        logger.debug(f"Cannot compute relative path (cross-drive): {target_abs} from {start_abs}")
+        return target_abs if fallback_to_absolute else None
+
+
 # ---- vendored: dazzle_filekit.operations.atomic_write_text (dazzle-filekit 0.3.2) ----
 def atomic_write_text(
     path: Union[str, Path],
@@ -125,10 +164,10 @@ MAJOR = 1
 MINOR = 5
 PATCH = 0
 PHASE = "alpha"  # Per-MINOR feature set: None, "alpha", "beta", "rc1", etc.
-PRE_RELEASE_NUM = 4
+PRE_RELEASE_NUM = 5
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0-alpha_phase1-src-split_95-20260717-493bbb1b"
+__version__ = "1.5.0-alpha_phase1-src-split_96-20260717-b4a1c5f2"
 
 
 def get_package_version():
@@ -2382,16 +2421,17 @@ class MonolithicWriter:
 
         try:
             for filename, checksum_info in sorted(checksums.items()):
-                # Calculate relative path from root
+                # Calculate relative path from root: filekit's
+                # compute_relative_path is exactly the relpath-with-
+                # absolute-fallback-on-cross-drive contract this inlined.
                 file_path = directory / filename
-                try:
-                    relative_path = os.path.relpath(file_path, self.root_path)
+                relative_path = compute_relative_path(file_path, self.root_path)
+                if os.path.isabs(relative_path):
+                    # Cross-drive (Windows): fell back to the absolute path
+                    logger.warning(f"Could not create relative path for {file_path}, using absolute path")
+                else:
                     # Use forward slashes for cross-platform compatibility
                     relative_path = relative_path.replace('\\', '/')
-                except ValueError:
-                    # Handle cases where paths are on different drives (Windows)
-                    relative_path = str(file_path)
-                    logger.warning(f"Could not create relative path for {file_path}, using absolute path")
 
                 # Write in standard format: hash  filename
                 self.file_handle.write(f"{checksum_info['hash']}  {relative_path}\n")
