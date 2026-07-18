@@ -55,7 +55,7 @@ MINOR = 5
 PATCH = 0
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0_scrub-rebuild_92-20260717-ca3e8757"
+__version__ = "1.5.0_scrub-rebuild_93-20260717-ed8ac752"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""
@@ -2231,8 +2231,12 @@ class StateCache:
     # commit is a journal fsync; per-folder commits cost hours at library
     # scale (measured: ~12% CPU, 88% fsync-blocked). The cache is a
     # disposable accelerator, so losing the tail of a batch in a crash just
-    # means those folders re-seed on the next run.
+    # means those folders re-seed on the next run. COMMIT_INTERVAL_S bounds
+    # the loss window in TIME as well: without it, a hard kill on a tree
+    # smaller than COMMIT_EVERY dirs forfeited the entire run's cache
+    # (adversarial finding, 2026-07-17). Ctrl-C always flushes via close().
     COMMIT_EVERY = 200
+    COMMIT_INTERVAL_S = 5.0
 
     def __init__(self, cache_path: Path):
         self.cache_path = Path(cache_path)
@@ -2245,6 +2249,7 @@ class StateCache:
         self.conn.execute("PRAGMA journal_mode = MEMORY")
         self._ensure_schema()
         self._pending = 0
+        self._last_commit = time.monotonic()
         self._folder_ids: Dict[str, int] = {}
 
     def _ensure_schema(self):
@@ -2313,7 +2318,8 @@ class StateCache:
             [(fid, name, e['size'], e['mtime_ns'], e['algo'], e['hash'], now)
              for name, e in entries.items()])
         self._pending += 1
-        if self._pending >= self.COMMIT_EVERY:
+        if (self._pending >= self.COMMIT_EVERY
+                or time.monotonic() - self._last_commit >= self.COMMIT_INTERVAL_S):
             self.flush()
 
     def flush(self):
@@ -2321,6 +2327,7 @@ class StateCache:
         if self.conn.in_transaction:
             self.conn.commit()
         self._pending = 0
+        self._last_commit = time.monotonic()
 
     def close(self):
         try:
@@ -2820,7 +2827,13 @@ class ChecksumGenerator:
                     if symlink_handler.check_and_mark_walk_path(d):
                         results_q.put((d, 'skip', None))
                         continue
-                if not symlink_handler.should_follow_link(d, self.follow_symlinks):
+                # Link policy: children are pre-filtered at DISCOVERY below
+                # using the parent scandir's cached reparse data (zero extra
+                # syscalls, v1.5.0a2; was 2 lstats per dir here at pop).
+                # Only the walk ROOT still needs the explicit check -- it was
+                # never anyone's child entry.
+                if d is root_directory and not symlink_handler.should_follow_link(
+                        d, self.follow_symlinks):
                     results_q.put((d, 'skip', None))
                     continue
                 # One scandir yields BOTH included files and child dirs
@@ -2829,7 +2842,14 @@ class ChecksumGenerator:
                 try:
                     with os.scandir(d) as it:
                         for entry in it:
-                            if entry.is_dir(follow_symlinks=self.follow_symlinks):
+                            if entry.is_dir(follow_symlinks=False):
+                                # DirEntry reparse data is already in hand:
+                                # skip symlinked/junction children lstat-free
+                                if entry.is_symlink():
+                                    continue
+                                is_junc = getattr(entry, 'is_junction', None)
+                                if is_junc is not None and is_junc():
+                                    continue
                                 child = Path(entry.path)
                                 if not _excluded_dir(child):
                                     subdirs.append(child)
@@ -2900,10 +2920,13 @@ class ChecksumGenerator:
                   'removed': 0, 'failed': 0, 'rewritten': 0}
         start_time = time.time()
 
-        # Worker count: default auto (min(8, cores)); 1 = the serial walker,
-        # byte-for-byte the pre-threading code path (escape hatch)
+        # Worker count: default auto = min(16, 2 x cores) -- scan workers are
+        # I/O-bound (idle in scandir/stat syscalls), so oversubscribing cores
+        # keeps the disk queue full: 16 workers measured 4.45 min vs 8.82 at
+        # 8 on the 3.38M-file reference library. 1 = the serial walker,
+        # byte-for-byte the pre-threading code path (escape hatch).
         if threads is None:
-            threads = min(8, os.cpu_count() or 4)
+            threads = min(16, 2 * (os.cpu_count() or 4))
 
         with StateCache(cache_path) as cache:
             def update_single_directory(directory: Path, pre_scanned=None):

@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.5.0-alpha.2] - 2026-07-17
+
+### Performance
+- Junction/symlink policy moved to DISCOVERY: child directories are filtered using the parent scandir's cached reparse data (zero extra syscalls) instead of two lstats per directory at processing time; only the walk root keeps the explicit check
+- Threaded worker default raised to min(16, 2 x cores): scan workers are I/O-bound, and oversubscription keeps the disk queue full -- measured 4.45 min at 16 workers vs 8.82 at 8 on the 3.38M-file reference library. **Full-library steady-state: 32.83 min (v1.4.4) -> 4.45 min (7.4x).**
+
+### Fixed
+- StateCache batches now also flush on a 5-second interval, bounding hard-kill cache loss in TIME as well as folder count (previously a TerminateProcess on a tree smaller than 200 dirs forfeited the whole run's cache; found by adversarial checklist agent). Ctrl-C always flushed via close().
+
+### Documentation
+- v1.4.4 checklist prerequisites fixed to actually construct the pure-extras fixture its HV.3 requires (agent finding); adversarial re-run of both checklists against the optimized engine recorded -- all HV items pass, including serial-vs-threaded manifest-set equivalence and junction handling under threading
+
 ## [1.5.0-alpha.1] - 2026-07-17
 
 ### Performance
