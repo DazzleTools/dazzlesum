@@ -24,6 +24,8 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
+from dazzle_filekit.operations import atomic_write_text
+
 from ._version import __version__
 from .constants import (logger, DEFAULT_ALGORITHM, SHASUM_FILENAME,
                         STATE_FILENAME, CACHE_FILENAME, MONOLITHIC_DEFAULT_NAME)
@@ -308,20 +310,14 @@ class ChecksumGenerator:
             shasum_path = directory / SHASUM_FILENAME
 
         try:
-            # Write to a temp file then atomically replace, so an interrupted
-            # run never leaves a truncated .shasum behind.
-            temp_path = shasum_path.with_name(shasum_path.name + '.tmp')
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                # Write header comment
-                f.write(f"# Dazzle checksum tool v{__version__} - {self.algorithm} - {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
-
-                # Write checksums in standard format
-                for filename, info in sorted(checksums.items()):
-                    f.write(f"{info['hash']}  {filename}\n")
-
-                # Write end marker
-                f.write("# End of checksums\n")
-            os.replace(temp_path, shasum_path)
+            # Build the manifest text, then hand it to filekit's atomic writer
+            # (tmp sibling + os.replace -- same idiom this method previously
+            # inlined), so an interrupted run never leaves a truncated .shasum.
+            lines = [f"# Dazzle checksum tool v{__version__} - {self.algorithm} - {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"]
+            for filename, info in sorted(checksums.items()):
+                lines.append(f"{info['hash']}  {filename}\n")
+            lines.append("# End of checksums\n")
+            atomic_write_text(shasum_path, ''.join(lines))
 
             if self.log_file:
                 logger.info(f"Wrote {len(checksums)} checksums to {shasum_path}")

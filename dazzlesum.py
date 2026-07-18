@@ -62,6 +62,58 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 state = sys.modules[__name__]
 
 
+# ===========================================================================
+# Vendored DazzleLib objects (generated -- see scripts/build_monolith.py)
+#
+# The src/ package imports these from the installed dazzle-lib /
+# dazzle-filekit libraries (hard dependencies since v1.5.0-alpha.4). The
+# single-file artifact must stay self-contained, so the exact objects used
+# are inlined here at build time from the installed library source. Free
+# module-level names they reference (e.g. ``logger``) bind to this
+# artifact's globals.
+# ===========================================================================
+
+
+# ---- vendored: dazzle_filekit.operations.atomic_write_text (dazzle-filekit 0.3.2) ----
+def atomic_write_text(
+    path: Union[str, Path],
+    content: str,
+    *,
+    encoding: str = "utf-8",
+    newline: Optional[str] = None,
+) -> None:
+    """Atomically write text content to ``path``.
+
+    Writes ``content`` to a sibling ``.tmp`` file and then renames it to
+    ``path`` via ``os.replace`` (atomic on POSIX and Windows since Python 3.3).
+    Readers observing the file see either the old contents or the new
+    contents -- never a partial write.
+
+    Creates parent directories if they don't exist.
+
+    Args:
+        path: Destination file path.
+        content: Text content to write.
+        encoding: Text encoding (keyword-only, default ``utf-8``).
+        newline: Newline translation, passed to ``open()`` (keyword-only,
+            default None = universal).
+
+    Raises:
+        OSError: If the write or rename fails. The ``.tmp`` file is left
+            in place for inspection.
+
+    Pattern source: ``safedel/_store.py:_save_manifest`` and
+    ``safedel/_volumes.py:save_registry`` both used this idiom; this
+    function centralizes it.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding=encoding, newline=newline) as f:
+        f.write(content)
+    os.replace(str(tmp_path), str(path))
+
+
 # ==========================================================================
 # ---- src/dazzlesum/_version.py -------------------------------------
 #      (monolith 3511c56 lines 50-64)
@@ -73,10 +125,10 @@ MAJOR = 1
 MINOR = 5
 PATCH = 0
 PHASE = "alpha"  # Per-MINOR feature set: None, "alpha", "beta", "rc1", etc.
-PRE_RELEASE_NUM = 3
+PRE_RELEASE_NUM = 4
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0-alpha_phase1-src-split_94-20260717-e464b9d3"
+__version__ = "1.5.0-alpha_phase1-src-split_95-20260717-493bbb1b"
 
 
 def get_package_version():
@@ -2809,20 +2861,14 @@ class ChecksumGenerator:
             shasum_path = directory / SHASUM_FILENAME
 
         try:
-            # Write to a temp file then atomically replace, so an interrupted
-            # run never leaves a truncated .shasum behind.
-            temp_path = shasum_path.with_name(shasum_path.name + '.tmp')
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                # Write header comment
-                f.write(f"# Dazzle checksum tool v{__version__} - {self.algorithm} - {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
-
-                # Write checksums in standard format
-                for filename, info in sorted(checksums.items()):
-                    f.write(f"{info['hash']}  {filename}\n")
-
-                # Write end marker
-                f.write("# End of checksums\n")
-            os.replace(temp_path, shasum_path)
+            # Build the manifest text, then hand it to filekit's atomic writer
+            # (tmp sibling + os.replace -- same idiom this method previously
+            # inlined), so an interrupted run never leaves a truncated .shasum.
+            lines = [f"# Dazzle checksum tool v{__version__} - {self.algorithm} - {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"]
+            for filename, info in sorted(checksums.items()):
+                lines.append(f"{info['hash']}  {filename}\n")
+            lines.append("# End of checksums\n")
+            atomic_write_text(shasum_path, ''.join(lines))
 
             if self.log_file:
                 logger.info(f"Wrote {len(checksums)} checksums to {shasum_path}")

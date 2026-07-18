@@ -16,6 +16,18 @@ How it works
   stripped -- in a single file every name is already a module global.
 * Column-0 stdlib import lines are collected, deduplicated preserving
   first-seen order, and emitted once at the top.
+* DazzleLib imports (``from dazzle_filekit... import``, ``from dazzle_lib
+  import``) are HARD dependencies of the src/ package (Phase 2 lib
+  integration -- pyproject pins minimum versions; there are no fallback
+  code paths in the package). For the artifact, these imports are stripped
+  and the exact objects used are INLINED at build time from the installed
+  library source (``inspect.getsource``), each under a provenance comment
+  naming the library, version, and object. This keeps the single-file
+  artifact self-contained without maintaining a parallel stdlib
+  reimplementation inside dazzlesum. Consequence: building the artifact
+  requires dazzle-lib/dazzle-filekit to be installed (they are install
+  dependencies anyway), and vendored code binds free module-level names
+  (e.g. ``logger``) to the artifact's globals.
 * The shared-state module (src/dazzlesum/state.py) collapses into the
   artifact's own globals; ``state = sys.modules[__name__]`` is emitted so
   every ``state.<name>`` reference in the stitched code reads and writes
@@ -67,7 +79,20 @@ MODULE_ORDER = [
 ]
 
 INTRA_IMPORT_RE = re.compile(r'^(?:from \.|from dazzlesum[\s.]|import dazzlesum)')
+LIB_IMPORT_RE = re.compile(r'^from (dazzle_lib|dazzle_filekit)((?:\.\w+)*) import (.+)$')
 IMPORT_LINE_RE = re.compile(r'^(?:import [A-Za-z_]|from [A-Za-z_][\w.]* import\b)')
+
+# Distribution names (for version lookup in provenance comments).
+LIB_DISTS = {'dazzle_lib': 'dazzle-lib', 'dazzle_filekit': 'dazzle-filekit'}
+
+# Objects that have no retrievable source (typing aliases etc.) are inlined
+# from this table instead of inspect.getsource.
+NON_SOURCE_SNIPPETS = {
+    ('dazzle_lib', 'HashResultDict'):
+        'HashResultDict = Dict[str, str]\n'
+        '"""Hash results keyed by algorithm name, hex digests as values\n'
+        '(alias of dazzle_lib.payloads.HashResultDict)."""\n',
+}
 
 HEADER_DOCSTRING = '''"""
 dazzle-checksum.py - Cross-Platform Checksum Tool
@@ -128,11 +153,14 @@ PROVENANCE_RE = re.compile(r'lines ([0-9, -]+)\.')
 
 
 def split_module(text):
-    """Return (stdlib_import_lines, provenance, body_text) for one module.
+    """Return (stdlib_import_lines, lib_objects, provenance, body_text).
 
     The module docstring is dropped from the artifact (its provenance line
     is hoisted into the section delimiter); intra-package imports are
     stripped; column-0 stdlib imports are collected for the shared header.
+    DazzleLib imports are stripped and returned as ``lib_objects`` --
+    ``(module, name)`` pairs in first-seen order -- for build-time inlining
+    (see the module docstring).
     """
     provenance = ''
     m = DOCSTRING_RE.match(text)
@@ -142,35 +170,89 @@ def split_module(text):
             provenance = pm.group(1).strip()
         text = text[m.end():]
     stdlib = []
+    lib_objects = []
     body = []
-    continuation = False  # inside a parenthesized intra-package import
+    continuation = None  # 'intra' | 'lib' inside a parenthesized import
+    lib_module = None
     for line in text.splitlines(keepends=True):
         if continuation:
+            if continuation == 'lib':
+                for nm in re.split(r'[,()\s]+', line):
+                    if nm:
+                        lib_objects.append((lib_module, nm))
             if ')' in line:
-                continuation = False
+                continuation = None
             continue
         if INTRA_IMPORT_RE.match(line):
             if '(' in line and ')' not in line:
-                continuation = True
+                continuation = 'intra'
+            continue
+        lm = LIB_IMPORT_RE.match(line)
+        if lm:
+            lib_module = lm.group(1) + lm.group(2)
+            names_part = lm.group(3)
+            if '(' in names_part and ')' not in names_part:
+                continuation = 'lib'
+            for nm in re.split(r'[,()\s]+', names_part):
+                if nm:
+                    lib_objects.append((lib_module, nm))
             continue
         if IMPORT_LINE_RE.match(line):
             stdlib.append(line if line.endswith('\n') else line + '\n')
             continue
         body.append(line)
     body_text = ''.join(body).strip('\n')
-    return stdlib, provenance, body_text
+    return stdlib, lib_objects, provenance, body_text
+
+
+VENDOR_HEADER = """\
+# ===========================================================================
+# Vendored DazzleLib objects (generated -- see scripts/build_monolith.py)
+#
+# The src/ package imports these from the installed dazzle-lib /
+# dazzle-filekit libraries (hard dependencies since v1.5.0-alpha.4). The
+# single-file artifact must stay self-contained, so the exact objects used
+# are inlined here at build time from the installed library source. Free
+# module-level names they reference (e.g. ``logger``) bind to this
+# artifact's globals.
+# ===========================================================================
+"""
+
+
+def build_vendored_section(lib_objects):
+    """Inline each (module, name) lib object with a provenance comment."""
+    if not lib_objects:
+        return ''
+    import importlib
+    import inspect
+    from importlib.metadata import version as dist_version
+    chunks = [VENDOR_HEADER]
+    for module_name, obj_name in lib_objects:
+        dist = LIB_DISTS[module_name.split('.')[0]]
+        prov = (f'# ---- vendored: {module_name}.{obj_name} '
+                f'({dist} {dist_version(dist)}) ----\n')
+        snippet = NON_SOURCE_SNIPPETS.get((module_name, obj_name))
+        if snippet is None:
+            mod = importlib.import_module(module_name)
+            snippet = inspect.getsource(getattr(mod, obj_name))
+        chunks.append(prov + snippet.rstrip('\n') + '\n')
+    return '\n\n'.join(chunks)
 
 
 def main():
     stdlib_seen = []
+    lib_objects_seen = []
     sections = []
     for name in MODULE_ORDER:
         path = SRC / f'{name}.py'
         text = path.read_text(encoding='utf-8')
-        stdlib, prov, body = split_module(text)
+        stdlib, lib_objects, prov, body = split_module(text)
         for line in stdlib:
             if line not in stdlib_seen:
                 stdlib_seen.append(line)
+        for pair in lib_objects:
+            if pair not in lib_objects_seen:
+                lib_objects_seen.append(pair)
         prov_note = (f'#      (monolith 3511c56 lines {prov})\n' if prov else '')
         delimiter = (
             '# ' + '=' * 74 + '\n'
@@ -183,6 +265,7 @@ def main():
         # here plus the two between sections would trip E303.
         sections.append(delimiter + body)
 
+    vendored = build_vendored_section(lib_objects_seen)
     parts = [
         '#!/usr/bin/env python3\n',
         HEADER_DOCSTRING,
@@ -193,6 +276,10 @@ def main():
         '\n',
         STATE_BINDING,
         '\n\n',
+    ]
+    if vendored:
+        parts += [vendored, '\n\n']
+    parts += [
         '\n\n\n'.join(sections),
         '\n\n\n',
         MAIN_GUARD,

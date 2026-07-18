@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.5.0-alpha.4] - 2026-07-17
+
+### Changed
+- dazzlesum now depends on the DazzleLib stack: `dazzle-lib>=0.6.7` and `dazzle-filekit>=0.3.2` are hard install dependencies (Phase 2 of the src/ refactor -- reuse over rewrite, no fallback shims)
+- `.shasum` writes go through filekit `operations.atomic_write_text` -- the same tmp-sibling + `os.replace` idiom the code previously inlined (byte-identical output, same `.shasum.tmp` sibling name, same newline translation)
+- The stitched single-file artifact stays self-contained: `scripts/build_monolith.py` strips DazzleLib imports and inlines the exact objects used at build time from the installed library source, each under a provenance comment
+- Packaging: the dynamic version attr now reads the stdlib-only `dazzlesum._version` submodule instead of importing the whole package (which would fail in isolated build environments lacking the new runtime deps)
+
 ## [1.5.0-alpha.2] - 2026-07-17
 
 ### Performance
