@@ -55,11 +55,14 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["dazzlesum"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.repokit-common]
 # Consumed by scripts/repokit-common/sync-versions.py (git-repokit-common subtree)
-version-source = "dazzlesum.py"
+version-source = "src/dazzlesum/_version.py"
 changelog-file = "CHANGELOG.md"
 repo-url = "https://github.com/DazzleTools/dazzlesum"
 
