@@ -47,7 +47,9 @@ exclude =
     .pytest_cache,
     # Vendored git-repokit-common subtree: kept upstream-pristine, not ours
     # to lint (its demo code has upstream F821s that broke CI)
-    scripts/repokit-common
+    scripts/repokit-common,
+    # Local-only (gitignored): design docs + archived pre-git ancestors
+    private
 per-file-ignores = 
     # Allow unused imports in __init__.py files
     __init__.py:F401,

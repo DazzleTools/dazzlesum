@@ -25,11 +25,12 @@ class TestVersioningSystem(unittest.TestCase):
         self.assertIsInstance(version, str)
         
         if '_' in version:
-            # Repokit-stamped build: 1.4.2_main_85-20260717-9310051e
-            # (BASE_BRANCH_BUILD-YYYYMMDD-HASH; parse from the right so
-            # branch names containing separators stay safe)
+            # Repokit-stamped build: 1.4.2_main_85-20260717-9310051e or
+            # 1.5.0-alpha_main_92-... (BASE[-PHASE]_BRANCH_BUILD-DATE-HASH;
+            # parse from the right so branch names with separators stay safe)
             prefix, build_info = version.rsplit('_', 1)
             base = prefix.split('_', 1)[0]
+            base = base.split('-', 1)[0]  # strip optional -PHASE (alpha/beta/rcN)
 
             # Base version should be semantic
             parts = base.split('.')
@@ -101,11 +102,12 @@ class TestVersioningSystem(unittest.TestCase):
         """Test that version can be compared for basic ordering."""
         version = dazzlesum.__version__
         
-        # Extract base version for comparison
+        # Extract base version for comparison (strip build info + -PHASE)
         if '_' in version:
             base_version = version.split('_')[0]
         else:
             base_version = version
+        base_version = base_version.split('-', 1)[0]
         
         # Should be greater than previous version
         self.assertGreater(base_version, "1.2.0")

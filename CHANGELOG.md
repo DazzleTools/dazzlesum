@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.5.0-alpha.1] - 2026-07-17
+
+### Performance
+- Compiled string-level pattern matching: all basename include/exclude patterns compile once into a single regex matched against entry names; multi-component patterns keep exact `Path.match` semantics via fallback. Kills per-file `Path` construction and per-pattern `Path.match` in the scan hot loop (was ~330 us/file profiled). Equivalence with legacy semantics pinned by a corpus test.
+- Per-directory `Path.resolve()` elimination: folder keys via string `relpath`, shadow paths and `--dirs-from` containment via try-first `relative_to` with resolve fallback. The old code performed four `_getfinalpathname` syscalls per directory (profiled at ~45s per 20K dirs).
+- Threaded scanning: `update --threads N` (default auto = min(8, cores)); worker threads perform scandir/stat/junction syscalls, while the cache, hashing, manifest writes, and totals stay on the coordinating thread. `--threads 1` is the unchanged serial path.
+- Visited-set redesign: physical (non-link-following) walks use a string-key duplicate guard instead of resolve+stat inode marking -- four fewer syscalls per directory and, in threaded mode, a syscall-free critical section.
+- Combined: the 20K-dir profile slice dropped 152s -> 33s before threading; full-library steady-state numbers recorded in the v1.4.4 Epic checklist.
+
+### Fixed
+- Coverage hole: inode-based visited marking stat()ed THROUGH junctions and recorded target inodes before the follow-policy check, so any junction pointing into a subtree caused the real subtree to be skipped as an "already visited" loop -- silently and deterministically, in every scan since the feature existed (a ~16K-file venv subtree was invisible to all previous scans of the reference library, including its committed baseline). Physical walks no longer consult inodes.
+
+### Changed
+- Version format tests understand the `-PHASE` segment (1.5.0-alpha builds)
+
 ## [1.4.5] - 2026-07-17
 
 ### Changed

@@ -422,6 +422,102 @@ class TestExcludeTraversalPruning(UpdateModeTestBase):
         self.assertTrue((self.root / "sub" / dazzlesum.SHASUM_FILENAME).exists())
 
 
+class TestThreadedUpdate(UpdateModeTestBase):
+    """AC-O3 (v1.5.0): the threaded scan path must produce totals identical
+    to the serial walker on the same tree, for both bootstrap and
+    steady-state runs. Note the default is threaded (auto), so the rest of
+    the suite exercises it implicitly; these tests pin serial equivalence."""
+
+    def _grow_tree(self):
+        for n in range(6):
+            d = self.root / f"t{n}" / "nested"
+            d.mkdir(parents=True)
+            for i in range(4):
+                write_file(d / f"f{i}.txt", f"content {n}-{i}\n")
+
+    def test_threaded_matches_serial_totals(self):
+        self._grow_tree()
+        serial = self.make_generator().run_update(
+            self.root, recursive=True, threads=1)
+        # Fresh tree state for an honest comparison: delete cache+manifests
+        (self.root / dazzlesum.CACHE_FILENAME).unlink()
+        for m in self.root.rglob(dazzlesum.SHASUM_FILENAME):
+            m.unlink()
+        threaded = self.make_generator().run_update(
+            self.root, recursive=True, threads=4)
+        self.assertEqual(serial, threaded)
+
+    def test_threaded_steady_state_zero_rehash(self):
+        self._grow_tree()
+        self.make_generator().run_update(self.root, recursive=True, threads=4)
+        generator = self.make_generator()
+        counter = HashCallCounter(generator)
+        totals = generator.run_update(self.root, recursive=True, threads=4)
+        self.assertEqual(counter.count, 0)
+        self.assertEqual(totals['rehashed'], 0)
+        self.assertEqual(totals['rewritten'], 0)
+
+    def test_threaded_respects_exclusions(self):
+        (self.root / ".git" / "objects").mkdir(parents=True)
+        write_file(self.root / ".git" / "config", "x\n")
+        generator = self.make_generator(exclude_patterns=['.git'])
+        generator.run_update(self.root, recursive=True, threads=4)
+        self.assertFalse((self.root / ".git" / dazzlesum.SHASUM_FILENAME).exists())
+
+
+class TestPatternMatcherEquivalence(unittest.TestCase):
+    """AC-O2 (v1.5.0): the compiled string-level matcher must agree with the
+    legacy per-pattern Path.match loop on every (path, patterns) combination
+    in this corpus -- including Windows case-insensitivity, near-miss names,
+    tool-owned files, and multi-component patterns."""
+
+    EXCLUDES = ["*.tmp", "*.log", "node_modules", "__pycache__", ".git",
+                "07*", "*.MOV", "Vault/Restricted/00 NO SCAN"]
+    INCLUDES_EMPTY = []
+    INCLUDES_MEDIA = ["*.mp4", "*.MKV"]
+
+    NAMES = ["a.tmp", "A.TMP", "b.log", "node_modules", "xnode_modules",
+             ".git", ".gitx", "00 NO SCAN", "IMG.mov", "img.MoV",
+             "data1", "readme.md", "movie.mp4", "MOVIE.MP4", "show.mkv",
+             ".shasum", ".shasum.tmp", ".dazzle-state.json",
+             ".dazzle-cache.sqlite", ".dazzle-cache.sqlite-journal"]
+
+    PARENTS = [Path("D:/fake/lib"), Path("D:/fake/Vault/Restricted"),
+               Path("D:/fake/Vault/Restricted/00 NO SCAN")]
+
+    def _make_generator(self, includes, excludes):
+        return dazzlesum.ChecksumGenerator(
+            algorithm='sha256', include_patterns=list(includes),
+            exclude_patterns=list(excludes), summary_mode=False)
+
+    def test_file_inclusion_equivalence(self):
+        for includes in (self.INCLUDES_EMPTY, self.INCLUDES_MEDIA):
+            gen = self._make_generator(includes, self.EXCLUDES)
+            for parent in self.PARENTS:
+                for name in self.NAMES:
+                    path = parent / name
+                    legacy = dazzlesum._should_include_file_simple(
+                        path, includes, self.EXCLUDES)
+                    fast = gen._include_entry(name, lambda p=path: p)
+                    self.assertEqual(
+                        legacy, fast,
+                        f"divergence: {path} includes={includes} "
+                        f"legacy={legacy} fast={fast}")
+
+    def test_dir_exclusion_equivalence(self):
+        walker = dazzlesum.FIFODirectoryWalker(exclude_patterns=self.EXCLUDES)
+
+        def legacy_check(item):
+            return any(item.match(p) for p in self.EXCLUDES)
+        dirs = [parent / name for parent in self.PARENTS
+                for name in ("node_modules", "src", "07 stuff", ".git",
+                             "00 NO SCAN", "Restricted")]
+        for d in dirs:
+            self.assertEqual(
+                legacy_check(d), walker._is_excluded_dir(d),
+                f"dir divergence: {d}")
+
+
 class TestStateCacheUnit(unittest.TestCase):
 
     def setUp(self):

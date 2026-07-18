@@ -38,9 +38,11 @@ import hashlib
 import logging
 import argparse
 import platform
+import queue as queue_module
 import sqlite3
 import subprocess
 import shutil
+import threading
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
@@ -49,11 +51,11 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 # Base semantic version -- managed by scripts/repokit-common/sync-versions.py
 # (component-per-line form is what its parser expects)
 MAJOR = 1
-MINOR = 4
-PATCH = 5
+MINOR = 5
+PATCH = 0
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.4.5_main_91-20260717-68a5b17c"
+__version__ = "1.5.0_scrub-rebuild_92-20260717-ca3e8757"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""
@@ -1453,14 +1455,67 @@ def count_dirs_and_files(root_path: Path, include_patterns, exclude_patterns,
     return total_dirs, total_files
 
 
+class CompiledPatternMatcher:
+    """String-level fast path for include/exclude pattern matching.
+
+    Path.match() in the per-file hot loop costs a Path allocation plus a
+    per-pattern parse for every file (3.37M files x 8 patterns on the
+    reference library). This compiles all BASENAME patterns (no '/') into one
+    alternation regex matched against the entry name string; multi-component
+    patterns (e.g. "Vault/Restricted/00 NO SCAN") are rare, sit outside
+    the per-file hot path, and keep exact Path.match semantics via fallback.
+
+    Case behavior mirrors pathlib: case-insensitive on Windows (Path.match
+    uses normcase), case-sensitive elsewhere. Equivalence with the legacy
+    per-pattern Path.match loop is pinned by tests.
+    """
+
+    def __init__(self, patterns):
+        import fnmatch as _fnmatch
+        self.patterns = list(patterns or [])
+        self.multi = [p for p in self.patterns if '/' in p.replace('\\', '/')]
+        basename = [p for p in self.patterns if p not in self.multi]
+        if basename:
+            joined = '|'.join(f'(?:{_fnmatch.translate(p)})' for p in basename)
+            flags = re.IGNORECASE if os.name == 'nt' else 0
+            self._name_re = re.compile(joined, flags)
+        else:
+            self._name_re = None
+
+    def matches_name(self, name: str) -> bool:
+        """True if the basename matches any basename pattern."""
+        return bool(self._name_re and self._name_re.match(name))
+
+    def matches_path(self, path: Path) -> bool:
+        """Full check: basename regex first, then multi-component fallback."""
+        if self._name_re and self._name_re.match(path.name):
+            return True
+        for pattern in self.multi:
+            if path.match(pattern):
+                return True
+        return False
+
+    def matches_multi(self, path: Path) -> bool:
+        """Check only the multi-component patterns (exact Path.match semantics)."""
+        for pattern in self.multi:
+            if path.match(pattern):
+                return True
+        return False
+
+
+def _always_excluded_name(filename: str) -> bool:
+    """Tool-owned files that must never be checksummed (string-only check)."""
+    return (filename in (SHASUM_FILENAME, STATE_FILENAME, SHASUM_FILENAME + '.tmp')
+            or filename.startswith(CACHE_FILENAME))
+
+
 def _should_include_file_simple(file_path: Path, include_patterns, exclude_patterns) -> bool:
     """Simplified version of file inclusion check for counting."""
     filename = file_path.name
 
     # Always exclude our own files (CACHE_FILENAME prefix also covers
     # SQLite sidecars like .dazzle-cache.sqlite-journal)
-    if filename in [SHASUM_FILENAME, STATE_FILENAME, SHASUM_FILENAME + '.tmp'] \
-            or filename.startswith(CACHE_FILENAME):
+    if _always_excluded_name(filename):
         return False
 
     # Apply exclude patterns
@@ -1625,6 +1680,24 @@ class SymlinkHandler:
         except ValueError:
             return False  # No parent relationship
 
+    def check_and_mark_walk_path(self, path: Path) -> bool:
+        """Cheap duplicate guard for physical (non-link-following) walks.
+
+        Returns True if the path was already seen. Keys by the walk path
+        STRING only -- no resolve(), no stat(). When links are not followed,
+        a BFS over physical directories cannot revisit a directory except by
+        being enqueued twice with the same path, so inode tracking (which
+        cost 4 syscalls per directory AND caused real directories to be
+        skipped when a junction elsewhere in the tree pointed at them --
+        their inodes got marked through the junction) is wrong here. Inode
+        loop-protection belongs only to link-FOLLOWING walks.
+        """
+        key = str(path)
+        if key in self.visited_paths:
+            return True
+        self.visited_paths.add(key)
+        return False
+
     def mark_visited(self, path: Path):
         """Mark a path as visited for loop detection."""
         # Mark by resolved path
@@ -1673,6 +1746,7 @@ class FIFODirectoryWalker:
         self.symlink_handler = SymlinkHandler()
         self.follow_symlinks = follow_symlinks
         self.exclude_patterns = exclude_patterns or []
+        self._exclude_matcher = CompiledPatternMatcher(self.exclude_patterns)
         self.processed_count = 0
 
     def _is_excluded_dir(self, item: Path) -> bool:
@@ -1680,13 +1754,15 @@ class FIFODirectoryWalker:
         semantics as file exclusion). Historically --exclude only filtered
         FILES by name -- traversal descended into .git, .private, etc. and
         checksummed their contents, since files inside an excluded directory
-        don't themselves match the directory's pattern."""
-        for pattern in self.exclude_patterns:
-            try:
-                if item.match(pattern):
-                    return True
-            except ValueError:
-                continue
+        don't themselves match the directory's pattern.
+
+        v1.5.0: basename patterns via one compiled regex on the dir NAME;
+        multi-component patterns keep exact Path.match semantics."""
+        m = self._exclude_matcher
+        if m.matches_name(item.name):
+            return True
+        if m.multi and m.matches_multi(item):
+            return True
         return False
 
     def walk_and_process(self, root_path: Path, processor_func, recursive=True):
@@ -1703,13 +1779,19 @@ class FIFODirectoryWalker:
         while self.processing_queue:
             current_dir = self.processing_queue.popleft()
 
-            # Safety check for loops
-            if self.symlink_handler.is_visited(current_dir):
-                logger.warning(f"Skipping {current_dir} - already visited (loop detected)")
+            # Duplicate/loop guard. Physical walks (follow_symlinks=False)
+            # use the cheap string-key guard: inode marking followed links
+            # via stat() and caused real directories to be skipped whenever a
+            # junction elsewhere pointed at them (coverage hole, found
+            # 2026-07-17: an entire venv subtree invisible to every scan),
+            # and cost 4 syscalls per directory.
+            if self.follow_symlinks:
+                if self.symlink_handler.is_visited(current_dir):
+                    logger.warning(f"Skipping {current_dir} - already visited (loop detected)")
+                    continue
+                self.symlink_handler.mark_visited(current_dir)
+            elif self.symlink_handler.check_and_mark_walk_path(current_dir):
                 continue
-
-            # Mark as visited
-            self.symlink_handler.mark_visited(current_dir)
 
             # Check if we should follow this directory (symlink safety)
             if not self.symlink_handler.should_follow_link(current_dir, self.follow_symlinks):
@@ -2045,22 +2127,28 @@ class ShadowPathResolver:
     
     def get_shadow_shasum_path(self, source_dir: Path) -> Path:
         """Get the shadow .shasum file path for a source directory.
-        
+
         Args:
             source_dir: Source directory that would contain .shasum file
-            
+
         Returns:
             Path to .shasum file in shadow directory structure
+
+        v1.5.0: fast path avoids the per-call Path.resolve() (an expensive
+        _getfinalpathname syscall, profiled at ~12s per 20K dirs) -- walker
+        paths already descend from the resolved source root. The resolve()
+        fallback keeps external callers with unnormalized paths correct.
         """
-        source_dir = Path(source_dir).resolve()
-        
-        # Calculate relative path from source root
         try:
-            rel_path = source_dir.relative_to(self.source_root)
+            rel_path = Path(source_dir).relative_to(self.source_root)
         except ValueError:
-            # source_dir is not under source_root
-            raise ValueError(f"Source directory {source_dir} is not under source root {self.source_root}")
-        
+            source_dir = Path(source_dir).resolve()
+            try:
+                rel_path = source_dir.relative_to(self.source_root)
+            except ValueError:
+                raise ValueError(
+                    f"Source directory {source_dir} is not under source root {self.source_root}")
+
         # Create corresponding shadow directory path
         shadow_dir = self.shadow_root / rel_path
         return shadow_dir / SHASUM_FILENAME
@@ -2173,9 +2261,16 @@ class StateCache:
 
     @staticmethod
     def folder_key(directory: Path, root: Path) -> str:
-        """Stable per-tree key: POSIX relative path from scan root ('.' for root)."""
-        rel = Path(directory).resolve().relative_to(Path(root).resolve())
-        return rel.as_posix() if str(rel) != '.' else '.'
+        """Stable per-tree key: POSIX relative path from scan root ('.' for root).
+
+        v1.5.0: pure string computation (os.path.relpath) -- the previous
+        Path.resolve().relative_to() cost TWO _getfinalpathname syscalls per
+        call (profiled at ~20s per 20K directories). Callers pass directories
+        descended from an already-resolved root (the walker guarantees this),
+        so no filesystem round-trip is needed.
+        """
+        rel = os.path.relpath(str(directory), str(root))
+        return '.' if rel == '.' else rel.replace('\\', '/')
 
     def _folder_id(self, folder: str, create: bool = False) -> Optional[int]:
         """Look up (optionally interning) the integer id for a folder path."""
@@ -2278,6 +2373,12 @@ class ChecksumGenerator:
         # Shadow directory support
         self.shadow_dir = Path(shadow_dir) if shadow_dir else None
         self.shadow_resolver = None
+
+        # Compiled string-level matchers for the per-file hot loops (v1.5.0):
+        # equivalence with the legacy per-pattern Path.match loop is pinned by
+        # tests/test_update_mode.py::TestPatternMatcherEquivalence
+        self._exclude_matcher = CompiledPatternMatcher(self.exclude_patterns)
+        self._include_matcher = CompiledPatternMatcher(self.include_patterns)
         
         # Resume support - track processed directories
         self.processed_directories = set()
@@ -2375,6 +2476,31 @@ class ChecksumGenerator:
     def should_include_file(self, file_path: Path) -> bool:
         """Determine if a file should be included in checksums."""
         return _should_include_file_simple(file_path, self.include_patterns, self.exclude_patterns)
+
+    def _include_entry(self, name: str, path_factory) -> bool:
+        """String-first inclusion check for scandir hot loops.
+
+        Semantics identical to should_include_file/_should_include_file_simple
+        but avoids constructing a Path (and running per-pattern Path.match)
+        for the overwhelmingly common case of basename-only patterns.
+        `path_factory` is called lazily only when multi-component patterns
+        need exact Path.match semantics.
+        """
+        if _always_excluded_name(name):
+            return False
+        ex = self._exclude_matcher
+        if ex.matches_name(name):
+            return False
+        if ex.multi and ex.matches_multi(path_factory()):
+            return False
+        inc = self._include_matcher
+        if inc.patterns:
+            if inc.matches_name(name):
+                return True
+            if inc.multi and inc.matches_multi(path_factory()):
+                return True
+            return False
+        return True
 
     def generate_checksums_for_directory(self, directory: Path) -> Dict[str, Any]:
         """Generate checksums for all files in a directory (non-recursive)."""
@@ -2505,9 +2631,31 @@ class ChecksumGenerator:
             elif not self.summary_mode:
                 logger.error(f"Error writing .shasum file to {directory}: {e}")
 
+    def scan_directory_files(self, directory: Path):
+        """One scandir pass over a directory: {name: stat} for included files.
+
+        Returns None on OSError (caller counts a failure). Thread-safe: uses
+        only the compiled matchers (read-only after init) and syscalls, so
+        worker threads can run it concurrently (scandir/stat release the GIL).
+        """
+        live = {}
+        try:
+            with os.scandir(directory) as it:
+                for entry in it:
+                    if entry.is_file(follow_symlinks=self.follow_symlinks) \
+                            and self._include_entry(
+                                entry.name,
+                                lambda e=entry: Path(e.path)):
+                        live[entry.name] = entry.stat(follow_symlinks=self.follow_symlinks)
+        except OSError as e:
+            logger.error(f"Error listing directory {directory}: {e}")
+            return None
+        return live
+
     def update_checksums_for_directory(self, directory: Path, state_cache: 'StateCache',
                                        root_directory: Path, bootstrap='hash',
-                                       paranoid=False, keep_missing=False) -> Dict[str, int]:
+                                       paranoid=False, keep_missing=False,
+                                       pre_scanned=None) -> Dict[str, int]:
         """Incrementally update one directory's .shasum, rehashing only what changed.
 
         Comparison is EQUALITY against recorded per-file state (size, mtime_ns),
@@ -2528,16 +2676,11 @@ class ChecksumGenerator:
         folder = StateCache.folder_key(directory, root_directory)
         cached = state_cache.get_folder(folder)
 
-        # One scandir pass: live files + their stat info
-        live = {}
-        try:
-            with os.scandir(directory) as it:
-                for entry in it:
-                    if entry.is_file(follow_symlinks=self.follow_symlinks) \
-                            and self.should_include_file(Path(entry.path)):
-                        live[entry.name] = entry.stat(follow_symlinks=self.follow_symlinks)
-        except OSError as e:
-            logger.error(f"Error listing directory {directory}: {e}")
+        # One scandir pass: live files + their stat info. String-first
+        # inclusion check -- no Path construction in the common case (v1.5.0).
+        # Threaded mode passes pre_scanned from a worker thread.
+        live = pre_scanned if pre_scanned is not None else self.scan_directory_files(directory)
+        if live is None:
             stats['failed'] += 1
             return stats
 
@@ -2637,8 +2780,103 @@ class ChecksumGenerator:
         state_cache.replace_folder(folder, cache_entries)
         return stats
 
+    def _threaded_update_walk(self, root_directory: Path, handle_result, workers: int):
+        """Parallel BFS for update mode: worker threads perform the syscall
+        work (scandir + stat + junction checks -- all GIL-releasing) and feed
+        results to the CALLING thread, which owns every piece of mutable
+        state (SQLite cache, totals, manifest writes) exactly as in serial
+        mode. handle_result(directory, live_or_None) runs on the caller.
+
+        Traversal semantics mirror FIFODirectoryWalker: visited-set loop
+        protection, symlink/junction policy, and exclusion pruning at
+        enqueue time.
+        """
+        work_q = queue_module.SimpleQueue()
+        results_q = queue_module.SimpleQueue()
+        lock = threading.Lock()
+        symlink_handler = SymlinkHandler()
+        matcher = self._exclude_matcher
+        state = {'discovered': 1, 'stop': False}
+        work_q.put(root_directory)
+
+        def _excluded_dir(item: Path) -> bool:
+            if matcher.matches_name(item.name):
+                return True
+            return bool(matcher.multi and matcher.matches_multi(item))
+
+        def worker():
+            while True:
+                try:
+                    d = work_q.get(timeout=0.1)
+                except queue_module.Empty:
+                    if state['stop']:
+                        return
+                    continue
+                # Cheap string-key duplicate guard (see FIFODirectoryWalker
+                # note); keeps the locked section syscall-free so workers
+                # don't serialize on it. Link-following walks use the serial
+                # engine (threaded mode requires follow_symlinks=False).
+                with lock:
+                    if symlink_handler.check_and_mark_walk_path(d):
+                        results_q.put((d, 'skip', None))
+                        continue
+                if not symlink_handler.should_follow_link(d, self.follow_symlinks):
+                    results_q.put((d, 'skip', None))
+                    continue
+                # One scandir yields BOTH included files and child dirs
+                live = {}
+                subdirs = []
+                try:
+                    with os.scandir(d) as it:
+                        for entry in it:
+                            if entry.is_dir(follow_symlinks=self.follow_symlinks):
+                                child = Path(entry.path)
+                                if not _excluded_dir(child):
+                                    subdirs.append(child)
+                            elif entry.is_file(follow_symlinks=self.follow_symlinks) \
+                                    and self._include_entry(
+                                        entry.name,
+                                        lambda e=entry: Path(e.path)):
+                                live[entry.name] = entry.stat(
+                                    follow_symlinks=self.follow_symlinks)
+                except OSError as e:
+                    logger.error(f"Error listing directory {d}: {e}")
+                    results_q.put((d, 'error', None))
+                    continue
+                if subdirs:
+                    with lock:
+                        state['discovered'] += len(subdirs)
+                    for child in subdirs:
+                        work_q.put(child)
+                results_q.put((d, 'ok', live))
+
+        threads = [threading.Thread(target=worker, daemon=True,
+                                    name=f"dzsum-scan-{i}")
+                   for i in range(workers)]
+        for t in threads:
+            t.start()
+
+        processed = 0
+        while True:
+            with lock:
+                discovered = state['discovered']
+            if processed >= discovered:
+                break
+            d, kind, live = results_q.get()
+            processed += 1
+            if kind == 'ok':
+                handle_result(d, live)
+            elif kind == 'error':
+                handle_result(d, None)
+            # 'skip' (visited/link-policy) produces no totals, matching serial
+
+        state['stop'] = True
+        for t in threads:
+            t.join(timeout=2.0)
+
     def run_update(self, root_directory: Path, recursive=True, dirs=None,
-                   bootstrap='hash', paranoid=False, keep_missing=False) -> Dict[str, int]:
+                   bootstrap='hash', paranoid=False, keep_missing=False,
+                   threads=None) -> Dict[str, int]:
         """Orchestrate an incremental update over a tree or an explicit folder list.
 
         `dirs` (iterable of paths under root_directory) is the universal
@@ -2662,11 +2900,17 @@ class ChecksumGenerator:
                   'removed': 0, 'failed': 0, 'rewritten': 0}
         start_time = time.time()
 
+        # Worker count: default auto (min(8, cores)); 1 = the serial walker,
+        # byte-for-byte the pre-threading code path (escape hatch)
+        if threads is None:
+            threads = min(8, os.cpu_count() or 4)
+
         with StateCache(cache_path) as cache:
-            def update_single_directory(directory: Path):
+            def update_single_directory(directory: Path, pre_scanned=None):
                 stats = self.update_checksums_for_directory(
                     directory, cache, root_directory, bootstrap=bootstrap,
-                    paranoid=paranoid, keep_missing=keep_missing)
+                    paranoid=paranoid, keep_missing=keep_missing,
+                    pre_scanned=pre_scanned)
                 totals['dirs'] += 1
                 for key, value in stats.items():
                     totals[key] += value
@@ -2678,21 +2922,37 @@ class ChecksumGenerator:
                         f"{totals['unchanged']} unchanged, {totals['rehashed']} rehashed, "
                         f"{totals['added']} added, {totals['removed']} removed")
 
+            def handle_scanned(directory: Path, live):
+                if live is None:
+                    totals['dirs'] += 1
+                    totals['failed'] += 1
+                    return
+                update_single_directory(directory, pre_scanned=live)
+
             if dirs is not None:
                 for d in dirs:
                     d = Path(d)
                     if not d.is_absolute():
                         d = root_directory / d
-                    d = d.resolve()
+                    # Containment check without per-entry resolve() (v1.5.0:
+                    # resolving each listed dir cost one _getfinalpathname
+                    # syscall per entry -- ~9s per 20K dirs profiled).
+                    # resolve() only as fallback for unnormalized input.
                     try:
                         d.relative_to(root_directory)
                     except ValueError:
-                        logger.warning(f"Skipping {d}: not under {root_directory}")
-                        continue
+                        d = d.resolve()
+                        try:
+                            d.relative_to(root_directory)
+                        except ValueError:
+                            logger.warning(f"Skipping {d}: not under {root_directory}")
+                            continue
                     if not d.is_dir():
                         logger.warning(f"Skipping {d}: not a directory")
                         continue
                     update_single_directory(d)
+            elif recursive and threads > 1 and not self.follow_symlinks:
+                self._threaded_update_walk(root_directory, handle_scanned, threads)
             else:
                 walker = FIFODirectoryWalker(self.follow_symlinks, self.exclude_patterns)
                 walker.walk_and_process(root_directory, update_single_directory, recursive)
@@ -4013,6 +4273,10 @@ For comprehensive examples: %(prog)s examples
                                    '(still applies add/remove semantics)')
     update_parser.add_argument('--keep-missing', action='store_true',
                               help='Keep manifest entries whose files no longer exist on disk')
+    update_parser.add_argument('--threads', type=int, metavar='N', default=None,
+                              help='Scanning worker threads (default: auto = min(8, CPU cores); '
+                                   '1 = single-threaded walker). Cache and manifest writes '
+                                   'always stay on one thread.')
     
     # MANAGE subcommand
     manage_parser = subparsers.add_parser('manage', parents=[parent],
@@ -4433,6 +4697,7 @@ def execute_update_action(args, directory):
         bootstrap=getattr(args, 'bootstrap', 'hash'),
         paranoid=getattr(args, 'paranoid', False),
         keep_missing=getattr(args, 'keep_missing', False),
+        threads=getattr(args, 'threads', None),
     )
     return 0 if totals and totals.get('failed', 0) == 0 else (1 if not totals else 2)
 
