@@ -74,6 +74,12 @@ state = sys.modules[__name__]
 # ===========================================================================
 
 
+# ---- vendored: dazzle_lib.HashResultDict (dazzle-lib 0.6.7) ----
+HashResultDict = Dict[str, str]
+"""Hash results keyed by algorithm name, hex digests as values
+(alias of dazzle_lib.payloads.HashResultDict)."""
+
+
 # ---- vendored: dazzle_filekit.paths.compute_relative_path (dazzle-filekit 0.3.2) ----
 def compute_relative_path(
     target: Union[str, Path],
@@ -164,10 +170,10 @@ MAJOR = 1
 MINOR = 5
 PATCH = 0
 PHASE = "alpha"  # Per-MINOR feature set: None, "alpha", "beta", "rc1", etc.
-PRE_RELEASE_NUM = 5
+PRE_RELEASE_NUM = 6
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0-alpha_phase1-src-split_96-20260717-b4a1c5f2"
+__version__ = "1.5.0-alpha_phase1-src-split_97-20260717-155eb925"
 
 
 def get_package_version():
@@ -1434,6 +1440,17 @@ class DazzleHashCalculator:
 
         # Fallback to Python implementation
         return self._calculate_with_python(file_path)
+
+    def calculate_hashes(self, file_path: Path) -> HashResultDict:
+        """Calculate this file's hash in the DazzleLib cross-layer shape.
+
+        The ecosystem-boundary form of :meth:`calculate_file_hash`: the same
+        computation (native tool first, normalized Python fallback), returned
+        as ``dazzle_lib.HashResultDict`` -- hex digests keyed by algorithm
+        name, e.g. ``{'sha256': 'ab12...'}`` -- the shape produced by filekit
+        ``verification.calculate_file_hash`` and consumed across the stack.
+        """
+        return {self.algorithm: self.calculate_file_hash(file_path)}
 
     def _calculate_with_fsum(self, file_path: Path) -> str:
         """Calculate hash using Windows fsum tool."""

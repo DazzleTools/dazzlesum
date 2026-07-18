@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.5.0-alpha.6] - 2026-07-17
+
+### Added
+- `DazzleHashCalculator.calculate_hashes()`: the DazzleLib ecosystem boundary -- same computation as `calculate_file_hash` (native tool first, normalized Python fallback), returned as `dazzle_lib.HashResultDict` (hex digests keyed by algorithm name, the shape filekit `verification.calculate_file_hash` produces and the stack consumes)
+
 ## [1.5.0-alpha.5] - 2026-07-17
 
 ### Changed

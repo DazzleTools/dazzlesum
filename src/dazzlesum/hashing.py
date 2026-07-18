@@ -24,6 +24,8 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
+from dazzle_lib import HashResultDict
+
 from .constants import (logger, is_windows, HAVE_UNCTOOLS, normalize_path,
                         safe_open, DEFAULT_ALGORITHM, DEFAULT_CHUNK_SIZE)
 from . import state
@@ -198,6 +200,17 @@ class DazzleHashCalculator:
 
         # Fallback to Python implementation
         return self._calculate_with_python(file_path)
+
+    def calculate_hashes(self, file_path: Path) -> HashResultDict:
+        """Calculate this file's hash in the DazzleLib cross-layer shape.
+
+        The ecosystem-boundary form of :meth:`calculate_file_hash`: the same
+        computation (native tool first, normalized Python fallback), returned
+        as ``dazzle_lib.HashResultDict`` -- hex digests keyed by algorithm
+        name, e.g. ``{'sha256': 'ab12...'}`` -- the shape produced by filekit
+        ``verification.calculate_file_hash`` and consumed across the stack.
+        """
+        return {self.algorithm: self.calculate_file_hash(file_path)}
 
     def _calculate_with_fsum(self, file_path: Path) -> str:
         """Calculate hash using Windows fsum tool."""

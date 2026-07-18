@@ -77,6 +77,20 @@ class TestBasicFunctionality(unittest.TestCase):
         filename = dazzlesum.SHASUM_FILENAME
         self.assertEqual(filename, '.shasum')
 
+    def test_calculate_hashes_dazzlelib_shape(self):
+        """calculate_hashes emits the dazzle-lib HashResultDict shape.
+
+        The DazzleLib cross-layer boundary: hex digests keyed by algorithm
+        name, matching filekit verification.calculate_file_hash output.
+        """
+        calc = dazzlesum.DazzleHashCalculator(algorithm='sha256')
+        result = calc.calculate_hashes(Path(self.test_file))
+        self.assertEqual(list(result.keys()), ['sha256'])
+        digest = result['sha256']
+        self.assertIsInstance(digest, str)
+        self.assertEqual(len(digest), 64)
+        self.assertEqual(digest, calc.calculate_file_hash(Path(self.test_file)))
+
 
 class TestHelperFunctions(unittest.TestCase):
     """Test helper functions if accessible."""
