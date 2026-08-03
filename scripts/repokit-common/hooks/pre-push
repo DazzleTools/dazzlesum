@@ -1,17 +1,22 @@
 #!/bin/bash
 #
-# Pre-push hook (repokit-common, PROJECT-MODIFIED for AMDead)
+# Pre-push hook (repokit-common)
 # Runs basic quality checks before pushing to remote.
 #
-# PROJECT MODIFICATION (do not lose on subtree pulls):
-#   The protected-branch block below refuses to push refs matching
-#   ^refs/heads/dev-[lL]6($|-) on either side. This is required while
-#   AMDead is in coordinated-disclosure with AMD (90-day window closes
-#   2026-06-06); the dev-L6 branch holds research artefacts that must
-#   not reach a public remote. When pulling subtree updates from
-#   git-repokit-common upstream, preserve the PROTECTED BRANCH BLOCK
-#   section and the REFS_DATA capture above it. Never `git subtree
-#   push` this directory back to upstream.
+# Optional protected-branch block:
+#   A repo can refuse to push branches matching a pattern -- useful when a
+#   branch holds material that must not reach a public remote. That pattern
+#   is per-repo POLICY, so it lives in the consuming repo's own config rather
+#   than in this shared hook:
+#
+#       git config repokit.protectedBranchRe '^refs/heads/wip-private($|-)'
+#
+#   Unset (the default) disables the block entirely, so repos that do not
+#   need it are unaffected. Because the value lives in .git/config it is
+#   local-only and never committed, which matters when the branch name is
+#   itself sensitive. Both source and destination refs are matched, so
+#   `git push origin foo:protected` cannot launder content past the check
+#   under a non-matching source name.
 #
 
 # Colors for output
@@ -30,15 +35,16 @@ cd "$(git rev-parse --show-toplevel)" 2>/dev/null || true
 REFS_DATA=$(cat)
 
 # =============================================================================
-# PROTECTED BRANCH BLOCK (PROJECT-MODIFIED -- AMDead)
-# Refuse to push refs matching dev-L6 (or dev-l6, dev-L6-*, dev-l6-*) on
-# either side -- catches both `git push origin dev-L6` (source matches)
-# and `git push origin foo:dev-L6` (destination matches, would otherwise
-# launder protected content under a non-protected source ref name).
+# PROTECTED BRANCH BLOCK (opt-in, per-repo)
+# Refuse to push refs matching repokit.protectedBranchRe on EITHER side --
+# catching both `git push origin protected` (source matches) and
+# `git push origin foo:protected` (destination matches, which would otherwise
+# launder protected content under a non-matching source ref name).
+# Unset by default: no pattern means the block is skipped entirely.
 # =============================================================================
-PROTECTED_BRANCH_RE='^refs/heads/dev-[lL]6($|-)'
+PROTECTED_BRANCH_RE="$(git config --get repokit.protectedBranchRe 2>/dev/null)"
 
-if [ -n "$REFS_DATA" ]; then
+if [ -n "$REFS_DATA" ] && [ -n "$PROTECTED_BRANCH_RE" ]; then
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         local_ref=$(echo "$line" | awk '{print $1}')
