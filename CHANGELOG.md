@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.5.0-alpha.7] - 2026-08-02
+
+### Fixed
+- Native checksum-tool detection now reads BOTH output streams and no longer trusts exit codes: real certutil prints its usage text to stdout with returncode 1, and fsum 2.51 prints its banner to stderr -- the old stdout-only / rc==0 checks rejected every native tool, silently forcing the pure-Python hashing fallback on all machines tested
+- The optional unctools integration had been silently dead since unctools 0.2.0 removed the APIs it soft-imported (the graceful fallback masked the ImportError, so the "enhanced UNC handling" never actually ran); UNC-aware path handling now flows through dazzle-filekit, whose path-identity layer is unctools-backed by hard dependency, and a guard test asserts the layer is genuinely wired
+
+### Changed
+- Hashing engine order flipped to Python-first: hashlib (in-process, OpenSSL-backed) handles every algorithm it supports; native tools are reserved for algorithms hashlib lacks. With detection fixed, native-first would have engaged certutil's per-file subprocess spawn (~75ms measured, >100x slower on small files -- a multi-million-file baseline would regress from minutes to days) AND broken verification of existing manifests: native tools hash raw bytes, bypassing the line-ending normalization every existing manifest was built with. Regression test pins the ordering; `--force-python` unchanged
+- Compat helpers `is_windows`, `safe_open`, and `file_exists` now delegate to dazzle-filekit (`is_windows`, `operations.open_file`, `utils.compat.path_exists_cross_platform`); `is_unc_path` (filekit) joins the public surface
+
+### Removed
+- `normalize_path` removed from the public surface: it was a retired unctools-era compat name whose actual behavior was always the no-op fallback; filekit's `normalize_cross_platform_path` serves the real use case, and hot paths deliberately do not normalize
+
+### Documentation
+- v1.5.0 ship-readiness checklist (`tests/checklists/`): smoke set plus artifact self-containment (bare-venv proof), real native-tool detection, UNC layer, and regression spot-checks for the src/ split line
+- Exit-codes reference now documents the full verify severity ladder (0-7 graded by success percentage, plus 1/130); the old table listed only 0, 1, and 130, leaving codes 2-7 undiscoverable to scripts
+- README hashing and platform claims corrected to match the Python-first engine and the filekit-backed UNC layer (the old text advertised native-tools-first and "optional unctools"); PyPI downloads badge added (pepy.tech -> pypistats)
+- Installation guide, requirements.txt, and CONTRIBUTING corrected for the 1.5.0 reality: Python floor 3.9 (was claiming 3.7), dazzle-lib/dazzle-filekit as the package's real dependencies (was claiming "none" plus optional unctools), and the src/ package as the development surface with `dazzlesum.py` as a generated artifact (was instructing "keep as single file")
+
 ## [1.5.0-alpha.6] - 2026-07-17
 
 ### Added

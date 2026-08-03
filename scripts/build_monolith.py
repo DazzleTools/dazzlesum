@@ -92,6 +92,34 @@ NON_SOURCE_SNIPPETS = {
         'HashResultDict = Dict[str, str]\n'
         '"""Hash results keyed by algorithm name, hex digests as values\n'
         '(alias of dazzle_lib.payloads.HashResultDict)."""\n',
+    # The four a7 filekit delegations below get SELF-CONTAINED artifact
+    # equivalents instead of inspect.getsource: their real implementations
+    # chain into filekit's resolver stack (PathVariantResolver protocol,
+    # unctools-backed variant resolution), which would drag half the library
+    # into the artifact. The package uses the real filekit implementations;
+    # the artifact gets stdlib behavior -- exactly what the artifact always
+    # had historically (the old unctools soft-import never activated).
+    ('dazzle_filekit', 'is_windows'):
+        'def is_windows():\n'
+        '    """Self-contained artifact equivalent of dazzle_filekit.is_windows."""\n'
+        "    return os.name == 'nt'\n",
+    ('dazzle_filekit.paths', 'is_unc_path'):
+        'def is_unc_path(path):\n'
+        '    """Self-contained artifact equivalent of dazzle_filekit.paths.is_unc_path\n'
+        '    (approximation: UNC = leading double separator; the package uses the\n'
+        '    real resolver-aware implementation)."""\n'
+        '    s = str(path)\n'
+        "    return s.startswith('\\\\\\\\') or s.startswith('//')\n",
+    ('dazzle_filekit.operations', 'open_file'):
+        'def open_file(path, mode=\'r\', *args, **kwargs):\n'
+        '    """Self-contained artifact equivalent of dazzle_filekit.operations.open_file\n'
+        '    (plain open; the package version adds UNC variant-resolution fallback)."""\n'
+        '    return open(path, mode, *args, **kwargs)\n',
+    ('dazzle_filekit.utils.compat', 'path_exists_cross_platform'):
+        'def path_exists_cross_platform(path):\n'
+        '    """Self-contained artifact equivalent of\n'
+        '    dazzle_filekit.utils.compat.path_exists_cross_platform."""\n'
+        '    return Path(path).exists()\n',
 }
 
 HEADER_DOCSTRING = '''"""
@@ -174,12 +202,31 @@ def split_module(text):
     body = []
     continuation = None  # 'intra' | 'lib' inside a parenthesized import
     lib_module = None
+
+    def _parse_import_names(names_part):
+        """Yield (object_name, bound_alias) from an import name list.
+
+        Handles trailing ``# noqa`` comments and ``x as y`` aliasing --
+        both introduced by the a7 filekit delegation imports; the naive
+        whitespace split previously treated '#' as an imported name.
+        """
+        names_part = names_part.split('#', 1)[0]
+        for chunk in names_part.replace('(', ' ').replace(')', ' ').split(','):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            if ' as ' in chunk:
+                obj, alias = (s.strip() for s in chunk.split(' as ', 1))
+            else:
+                obj = alias = chunk
+            if obj:
+                yield obj, alias
+
     for line in text.splitlines(keepends=True):
         if continuation:
             if continuation == 'lib':
-                for nm in re.split(r'[,()\s]+', line):
-                    if nm:
-                        lib_objects.append((lib_module, nm))
+                for obj, alias in _parse_import_names(line):
+                    lib_objects.append((lib_module, obj, alias))
             if ')' in line:
                 continuation = None
             continue
@@ -193,9 +240,8 @@ def split_module(text):
             names_part = lm.group(3)
             if '(' in names_part and ')' not in names_part:
                 continuation = 'lib'
-            for nm in re.split(r'[,()\s]+', names_part):
-                if nm:
-                    lib_objects.append((lib_module, nm))
+            for obj, alias in _parse_import_names(names_part):
+                lib_objects.append((lib_module, obj, alias))
             continue
         if IMPORT_LINE_RE.match(line):
             stdlib.append(line if line.endswith('\n') else line + '\n')
@@ -220,14 +266,28 @@ VENDOR_HEADER = """\
 
 
 def build_vendored_section(lib_objects):
-    """Inline each (module, name) lib object with a provenance comment."""
+    """Inline each (module, obj, alias) lib object with provenance.
+
+    Each distinct (module, obj) is vendored once; every alias it was
+    imported under gets a binding line after the snippet (``x as y``
+    imports vendor ``def x`` then emit ``y = x``).
+    """
     if not lib_objects:
         return ''
     import importlib
     import inspect
     from importlib.metadata import version as dist_version
     chunks = [VENDOR_HEADER]
-    for module_name, obj_name in lib_objects:
+    vendored = {}  # (module, obj) -> set of aliases needing bindings
+    order = []
+    for module_name, obj_name, alias in lib_objects:
+        key = (module_name, obj_name)
+        if key not in vendored:
+            vendored[key] = set()
+            order.append(key)
+        if alias != obj_name:
+            vendored[key].add(alias)
+    for module_name, obj_name in order:
         dist = LIB_DISTS[module_name.split('.')[0]]
         prov = (f'# ---- vendored: {module_name}.{obj_name} '
                 f'({dist} {dist_version(dist)}) ----\n')
@@ -235,7 +295,10 @@ def build_vendored_section(lib_objects):
         if snippet is None:
             mod = importlib.import_module(module_name)
             snippet = inspect.getsource(getattr(mod, obj_name))
-        chunks.append(prov + snippet.rstrip('\n') + '\n')
+        piece = prov + snippet.rstrip('\n') + '\n'
+        for alias in sorted(vendored[(module_name, obj_name)]):
+            piece += f'{alias} = {obj_name}\n'
+        chunks.append(piece)
     return '\n\n'.join(chunks)
 
 

@@ -54,7 +54,7 @@ Enhancement suggestions are welcome! Please:
 
 Before submitting:
 
-1. Test basic functionality: `python dazzlesum.py --version`
+1. Run the suite against both targets: `python -m pytest tests` and again with `DAZZLESUM_TEST_TARGET=stitched` (after regenerating the artifact via `python scripts/build_monolith.py`)
 2. Test core features: generation, verification, management operations
 3. Test on different file types and directory structures
 4. Verify cross-platform compatibility when possible
@@ -88,9 +88,11 @@ This project uses a simple branch strategy:
 
 ### Project Structure
 
-- `dazzlesum.py`: Main application (keep as single file for portability)
-- `requirements.txt`: Python dependencies (keep minimal)
-- `tests/`: Test files and examples
+- `src/dazzlesum/`: The package -- where development happens
+- `dazzlesum.py`: GENERATED single-file artifact -- do not hand-edit; regenerate with `python scripts/build_monolith.py` after changing `src/`
+- `scripts/build_monolith.py`: The stitcher that produces `dazzlesum.py` from the package (vendors the used library objects so the artifact stays standard-library-only)
+- `requirements.txt`: Python dependencies (authoritative list in `pyproject.toml`)
+- `tests/`: Test files and examples -- the suite runs against BOTH targets: the package by default, and the stitched artifact with `DAZZLESUM_TEST_TARGET=stitched`
 - `docs/`: User documentation
 
 ### DOS Compatibility

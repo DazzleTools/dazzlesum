@@ -25,22 +25,28 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
 
-# Try to import unctools for enhanced path handling
-try:
-    import unctools
-    from unctools import normalize_path, convert_to_local, is_unc_path
-    from unctools.utils import is_windows as unctools_is_windows, get_platform_info
-    from unctools.operations import safe_open, file_exists
-    HAVE_UNCTOOLS = True
-    # Use unctools function
-    def is_windows(): return unctools_is_windows
-except ImportError:
-    HAVE_UNCTOOLS = False
-    # Fallback implementations
-    def is_windows(): return os.name == 'nt'
-    def normalize_path(p): return Path(p)
-    def safe_open(p, *args, **kwargs): return open(p, *args, **kwargs)
-    def file_exists(p): return Path(p).exists()
+# UNC-aware path handling comes THROUGH dazzle-filekit (a hard dependency
+# since v1.5.0-alpha.4), whose path-identity layer is itself backed by
+# unctools (filekit declares unctools>=0.2.2 as its L0). dazzlesum no longer
+# imports unctools directly: the original soft-import targeted a pre-0.2.0
+# unctools surface (normalize_path, unctools.operations.*) that later
+# versions removed, so it failed silently and HAVE_UNCTOOLS was False on
+# every modern install -- the "enhanced UNC handling" never actually ran
+# (v1.5.0 fix).
+from dazzle_filekit import is_windows  # noqa: F401
+from dazzle_filekit.paths import is_unc_path  # noqa: F401
+from dazzle_filekit.operations import open_file as safe_open  # noqa: F401
+from dazzle_filekit.utils.compat import path_exists_cross_platform as file_exists  # noqa: F401
+
+# Kept True for API compatibility: UNC support is now unconditionally
+# available via filekit's unctools-backed layer.
+HAVE_UNCTOOLS = True
+
+# NOTE: normalize_path (a retired unctools-era compat name whose actual
+# behavior was always the no-op fallback) is REMOVED from the public surface
+# in 1.5.0; filekit's normalize_cross_platform_path serves the real use case
+# (user-input path normalization) and hot paths deliberately do not
+# normalize (see the v1.5.0 enumeration-optimization notes).
 
 # Constants
 DEFAULT_ALGORITHM = 'sha256'

@@ -74,13 +74,44 @@ state = sys.modules[__name__]
 # ===========================================================================
 
 
-# ---- vendored: dazzle_lib.HashResultDict (dazzle-lib 0.6.7) ----
+# ---- vendored: dazzle_filekit.is_windows (dazzle-filekit 0.4.2) ----
+def is_windows():
+    """Self-contained artifact equivalent of dazzle_filekit.is_windows."""
+    return os.name == 'nt'
+
+
+# ---- vendored: dazzle_filekit.paths.is_unc_path (dazzle-filekit 0.4.2) ----
+def is_unc_path(path):
+    """Self-contained artifact equivalent of dazzle_filekit.paths.is_unc_path
+    (approximation: UNC = leading double separator; the package uses the
+    real resolver-aware implementation)."""
+    s = str(path)
+    return s.startswith('\\\\') or s.startswith('//')
+
+
+# ---- vendored: dazzle_filekit.operations.open_file (dazzle-filekit 0.4.2) ----
+def open_file(path, mode='r', *args, **kwargs):
+    """Self-contained artifact equivalent of dazzle_filekit.operations.open_file
+    (plain open; the package version adds UNC variant-resolution fallback)."""
+    return open(path, mode, *args, **kwargs)
+safe_open = open_file
+
+
+# ---- vendored: dazzle_filekit.utils.compat.path_exists_cross_platform (dazzle-filekit 0.4.2) ----
+def path_exists_cross_platform(path):
+    """Self-contained artifact equivalent of
+    dazzle_filekit.utils.compat.path_exists_cross_platform."""
+    return Path(path).exists()
+file_exists = path_exists_cross_platform
+
+
+# ---- vendored: dazzle_lib.HashResultDict (dazzle-lib 0.8.2) ----
 HashResultDict = Dict[str, str]
 """Hash results keyed by algorithm name, hex digests as values
 (alias of dazzle_lib.payloads.HashResultDict)."""
 
 
-# ---- vendored: dazzle_filekit.paths.compute_relative_path (dazzle-filekit 0.3.2) ----
+# ---- vendored: dazzle_filekit.paths.compute_relative_path (dazzle-filekit 0.4.2) ----
 def compute_relative_path(
     target: Union[str, Path],
     start: Union[str, Path],
@@ -119,7 +150,7 @@ def compute_relative_path(
         return target_abs if fallback_to_absolute else None
 
 
-# ---- vendored: dazzle_filekit.operations.atomic_write_text (dazzle-filekit 0.3.2) ----
+# ---- vendored: dazzle_filekit.operations.atomic_write_text (dazzle-filekit 0.4.2) ----
 def atomic_write_text(
     path: Union[str, Path],
     content: str,
@@ -156,7 +187,20 @@ def atomic_write_text(
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     with open(tmp_path, "w", encoding=encoding, newline=newline) as f:
         f.write(content)
-    os.replace(str(tmp_path), str(path))
+    # Windows: antivirus/indexers briefly lock freshly-written files, so a
+    # first os.replace can fail with PermissionError [WinError 5] even
+    # though nothing of ours holds the file (observed in the wild: one
+    # random victim test per dazzlecmd full-suite run). A short bounded
+    # retry absorbs the transient; a REAL permission problem still
+    # surfaces after ~0.3s total.
+    for attempt in range(6):
+        try:
+            os.replace(str(tmp_path), str(path))
+            break
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.01 * (2 ** attempt))  # 10..160ms backoff
 
 
 # ==========================================================================
@@ -170,10 +214,10 @@ MAJOR = 1
 MINOR = 5
 PATCH = 0
 PHASE = "alpha"  # Per-MINOR feature set: None, "alpha", "beta", "rc1", etc.
-PRE_RELEASE_NUM = 6
+PRE_RELEASE_NUM = 7
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0-alpha_phase1-src-split_97-20260717-155eb925"
+__version__ = "1.5.0-alpha_phase1-src-split_98-20260802-73bae58c"
 
 
 def get_package_version():
@@ -188,22 +232,24 @@ __author__ = "Dustin Darcy"
 # ---- src/dazzlesum/constants.py ------------------------------------
 #      (monolith 3511c56 lines 66-98)
 # ==========================================================================
-# Try to import unctools for enhanced path handling
-try:
-    import unctools
-    from unctools import normalize_path, convert_to_local, is_unc_path
-    from unctools.utils import is_windows as unctools_is_windows, get_platform_info
-    from unctools.operations import safe_open, file_exists
-    HAVE_UNCTOOLS = True
-    # Use unctools function
-    def is_windows(): return unctools_is_windows
-except ImportError:
-    HAVE_UNCTOOLS = False
-    # Fallback implementations
-    def is_windows(): return os.name == 'nt'
-    def normalize_path(p): return Path(p)
-    def safe_open(p, *args, **kwargs): return open(p, *args, **kwargs)
-    def file_exists(p): return Path(p).exists()
+# UNC-aware path handling comes THROUGH dazzle-filekit (a hard dependency
+# since v1.5.0-alpha.4), whose path-identity layer is itself backed by
+# unctools (filekit declares unctools>=0.2.2 as its L0). dazzlesum no longer
+# imports unctools directly: the original soft-import targeted a pre-0.2.0
+# unctools surface (normalize_path, unctools.operations.*) that later
+# versions removed, so it failed silently and HAVE_UNCTOOLS was False on
+# every modern install -- the "enhanced UNC handling" never actually ran
+# (v1.5.0 fix).
+
+# Kept True for API compatibility: UNC support is now unconditionally
+# available via filekit's unctools-backed layer.
+HAVE_UNCTOOLS = True
+
+# NOTE: normalize_path (a retired unctools-era compat name whose actual
+# behavior was always the no-op fallback) is REMOVED from the public surface
+# in 1.5.0; filekit's normalize_cross_platform_path serves the real use case
+# (user-input path normalization) and hot paths deliberately do not
+# normalize (see the v1.5.0 enumeration-optimization notes).
 
 # Constants
 DEFAULT_ALGORITHM = 'sha256'
@@ -1353,7 +1399,30 @@ class DazzleHashCalculator:
         self.algorithm = algorithm.lower()
         self.chunk_size = chunk_size
         self.line_handler = LineEndingHandler(line_ending_strategy)
-        self.native_tool = self._detect_native_tool()
+        # Python hashlib is the primary engine: it is in-process (native
+        # tools cost a per-file subprocess spawn -- ~75ms measured for
+        # certutil, a >100x slowdown on small files) and it is the only
+        # engine that applies line-ending normalization, so it is the
+        # engine every existing manifest was built with. Native tools are
+        # probed only when hashlib lacks the algorithm.
+        self._hashlib_supported = self._hashlib_supports(self.algorithm)
+        if self._hashlib_supported:
+            self.native_tool = None
+            if state.dazzle_logger:
+                state.dazzle_logger.tool_selection(None, self.algorithm)
+            else:
+                logger.debug(f"Using Python implementation for {self.algorithm}")
+        else:
+            self.native_tool = self._detect_native_tool()
+
+    @staticmethod
+    def _hashlib_supports(algorithm: str) -> bool:
+        """True when hashlib can construct this algorithm."""
+        try:
+            hashlib.new(algorithm)
+            return True
+        except (ValueError, TypeError):
+            return False
 
     def _detect_native_tool(self) -> Optional[str]:
         """Detect available native checksum tools."""
@@ -1386,20 +1455,32 @@ class DazzleHashCalculator:
         return None
 
     def _tool_available(self, tool: str) -> bool:
-        """Check if a native tool is available."""
+        """Check if a native tool is available.
+
+        Detection reads BOTH output streams and does not trust exit codes:
+        real tools disagree wildly here -- certutil prints its usage text to
+        STDOUT with returncode 1, and fsum 2.51 prints its banner to STDERR
+        (both verified on real machines; the old stdout-only and
+        rc==0-or-usage-in-stderr checks rejected every native tool, silently
+        forcing the pure-Python hashing fallback everywhere).
+        """
         try:
-            # Special handling for fsum
+            # Special handling for fsum: invoked bare, banner identifies it
             if tool == 'fsum':
                 result = subprocess.run([tool], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
-                # fsum returns usage info when called without arguments
-                return 'SlavaSoft' in result.stdout or 'fsum' in result.stdout.lower()
+                combined = (result.stdout + result.stderr).lower()
+                return 'slavasoft' in combined or 'fsum' in combined
 
-            # For other tools, try --help or --version
+            # For other tools, try --help or --version; usage text or the
+            # tool's own name in EITHER stream counts
             for flag in ['--help', '--version', '-h']:
                 try:
                     result = subprocess.run([tool, flag], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
-                    if result.returncode == 0 or 'usage' in result.stderr.lower():
+                    combined = (result.stdout + result.stderr).lower()
+                    if result.returncode == 0 or 'usage' in combined or tool.lower() in combined:
                         return True
+                except FileNotFoundError:
+                    return False  # tool absent -- no point trying more flags
                 except Exception:
                     continue
 
@@ -1426,11 +1507,19 @@ class DazzleHashCalculator:
 
     def calculate_file_hash(self, file_path: Path) -> str:
         """Calculate hash for a single file."""
-        # Normalize path using unctools if available
-        if HAVE_UNCTOOLS:
-            file_path = normalize_path(file_path)
+        # (The old HAVE_UNCTOOLS normalize_path gate was dead code: the flag
+        # was always False on modern unctools, and the fallback was a no-op.
+        # Hot paths deliberately do not normalize paths -- v1.5.0.)
 
-        # Try native tool first
+        # Python hashlib first: in-process (no per-file subprocess spawn)
+        # and the only engine that applies line-ending normalization, so
+        # a native tool's raw-byte digest would not even match existing
+        # manifests for CRLF text files.
+        if self._hashlib_supported:
+            return self._calculate_with_python(file_path)
+
+        # Algorithm outside hashlib: fall back to a native tool (raw-byte
+        # hashing, no normalization).
         if self.native_tool:
             try:
                 return self._calculate_with_native_tool(file_path)
@@ -1438,17 +1527,18 @@ class DazzleHashCalculator:
                 # Only log warning in debug mode to reduce noise
                 logger.debug(f"Native tool {self.native_tool} failed for {file_path}, using Python: {e}")
 
-        # Fallback to Python implementation
+        # Last resort: lets hashlib raise its informative unsupported-algorithm error
         return self._calculate_with_python(file_path)
 
     def calculate_hashes(self, file_path: Path) -> HashResultDict:
         """Calculate this file's hash in the DazzleLib cross-layer shape.
 
         The ecosystem-boundary form of :meth:`calculate_file_hash`: the same
-        computation (native tool first, normalized Python fallback), returned
-        as ``dazzle_lib.HashResultDict`` -- hex digests keyed by algorithm
-        name, e.g. ``{'sha256': 'ab12...'}`` -- the shape produced by filekit
-        ``verification.calculate_file_hash`` and consumed across the stack.
+        computation (normalized Python hashlib first, native tool only for
+        algorithms hashlib lacks), returned as ``dazzle_lib.HashResultDict``
+        -- hex digests keyed by algorithm name, e.g. ``{'sha256': 'ab12...'}``
+        -- the shape produced by filekit ``verification.calculate_file_hash``
+        and consumed across the stack.
         """
         return {self.algorithm: self.calculate_file_hash(file_path)}
 
@@ -1543,14 +1633,13 @@ class DazzleHashCalculator:
         except ValueError:
             raise ValueError(f"Unsupported hash algorithm: {self.algorithm}")
 
-        # Use safe_open if available
+        # Plain open: the old HAVE_UNCTOOLS/safe_open branch was dead code
+        # (the unctools API it soft-imported no longer exists, so the flag
+        # was always False; safe_open's local fallback was open anyway).
+        # UNC-path handling now flows through dazzle-filekit (v1.5.0).
         try:
-            if HAVE_UNCTOOLS:
-                with safe_open(file_path, 'rb') as f:
-                    return self._hash_file_content(f, hasher)
-            else:
-                with open(file_path, 'rb') as f:
-                    return self._hash_file_content(f, hasher)
+            with open(file_path, 'rb') as f:
+                return self._hash_file_content(f, hasher)
         except Exception as e:
             logger.error(f"Error reading file {file_path}: {e}")
             raise

@@ -2,6 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/dazzlesum?color=green)](https://pypi.org/project/dazzlesum/)
 [![Release Date](https://img.shields.io/github/release-date/DazzleTools/dazzlesum?color=green)](https://github.com/DazzleTools/dazzlesum/releases)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/dazzlesum?period=total&units=international_system&left_color=black&right_color=green&left_text=downloads)](https://pypistats.org/packages/dazzlesum)
 [![CI](https://github.com/DazzleTools/dazzlesum/actions/workflows/python.yml/badge.svg)](https://github.com/DazzleTools/dazzlesum/actions)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3-green.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
@@ -14,7 +15,7 @@ Dazzlesum is a handy checksum tool designed for data integrity verification acro
 - **Multiple Hash Algorithms**: SHA256 (default), SHA512, SHA1, MD5 with consistent cross-platform behavior
 - **Cross-Platform Support**: Seamlessly handle checksums between Windows, macOS, Linux, and BSD
 - **DOS Compatibility**: ASCII-only output that works perfectly in Windows Command Prompt
-- **Native Tool Integration**: Uses system tools (certutil, shasum, fsum) with intelligent Python fallback
+- **In-Process Hashing Engine**: Python hashlib (OpenSSL-backed) as the primary engine -- no per-file subprocess overhead; native system tools (certutil, shasum, fsum) remain as fallback for algorithms hashlib lacks
 - **Flexible Generation Modes**: Individual `.shasum` files per directory, monolithic files, or both simultaneously
 - **Advanced Verification**: Problems-only output shows only failed, missing, or extra files by default
 - **Management Operations**: Backup, remove, restore, and list `.shasum` files with comprehensive metadata
@@ -184,12 +185,12 @@ dazzlesum shadow      # Shadow directory help
 ### Windows
 - **Command Prompt**: Full ASCII compatibility
 - **PowerShell**: Native support
-- **Tools**: Uses `certutil` or `fsum` when available
-- **Paths**: Handles UNC paths with optional [`unctools` package](https://github.com/djdarcy/UNCtools)
+- **Hashing**: In-process Python hashlib; `certutil`/`fsum` detected as fallback
+- **Paths**: UNC-aware handling through the dazzle-filekit dependency (backed by [`unctools`](https://github.com/djdarcy/UNCtools))
 
 ### macOS/Linux
 - **Terminal**: Full compatibility
-- **Tools**: Uses `shasum` when available
+- **Hashing**: In-process Python hashlib; `shasum`/`sha256sum` detected as fallback
 - **Paths**: Native Unix path handling
 - **Performance**: Optimized for large file trees
 

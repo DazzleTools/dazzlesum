@@ -26,8 +26,8 @@ from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
 from dazzle_lib import HashResultDict
 
-from .constants import (logger, is_windows, HAVE_UNCTOOLS, normalize_path,
-                        safe_open, DEFAULT_ALGORITHM, DEFAULT_CHUNK_SIZE)
+from .constants import (logger, is_windows,
+                        DEFAULT_ALGORITHM, DEFAULT_CHUNK_SIZE)
 from . import state
 
 
@@ -113,7 +113,30 @@ class DazzleHashCalculator:
         self.algorithm = algorithm.lower()
         self.chunk_size = chunk_size
         self.line_handler = LineEndingHandler(line_ending_strategy)
-        self.native_tool = self._detect_native_tool()
+        # Python hashlib is the primary engine: it is in-process (native
+        # tools cost a per-file subprocess spawn -- ~75ms measured for
+        # certutil, a >100x slowdown on small files) and it is the only
+        # engine that applies line-ending normalization, so it is the
+        # engine every existing manifest was built with. Native tools are
+        # probed only when hashlib lacks the algorithm.
+        self._hashlib_supported = self._hashlib_supports(self.algorithm)
+        if self._hashlib_supported:
+            self.native_tool = None
+            if state.dazzle_logger:
+                state.dazzle_logger.tool_selection(None, self.algorithm)
+            else:
+                logger.debug(f"Using Python implementation for {self.algorithm}")
+        else:
+            self.native_tool = self._detect_native_tool()
+
+    @staticmethod
+    def _hashlib_supports(algorithm: str) -> bool:
+        """True when hashlib can construct this algorithm."""
+        try:
+            hashlib.new(algorithm)
+            return True
+        except (ValueError, TypeError):
+            return False
 
     def _detect_native_tool(self) -> Optional[str]:
         """Detect available native checksum tools."""
@@ -146,20 +169,32 @@ class DazzleHashCalculator:
         return None
 
     def _tool_available(self, tool: str) -> bool:
-        """Check if a native tool is available."""
+        """Check if a native tool is available.
+
+        Detection reads BOTH output streams and does not trust exit codes:
+        real tools disagree wildly here -- certutil prints its usage text to
+        STDOUT with returncode 1, and fsum 2.51 prints its banner to STDERR
+        (both verified on real machines; the old stdout-only and
+        rc==0-or-usage-in-stderr checks rejected every native tool, silently
+        forcing the pure-Python hashing fallback everywhere).
+        """
         try:
-            # Special handling for fsum
+            # Special handling for fsum: invoked bare, banner identifies it
             if tool == 'fsum':
                 result = subprocess.run([tool], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
-                # fsum returns usage info when called without arguments
-                return 'SlavaSoft' in result.stdout or 'fsum' in result.stdout.lower()
+                combined = (result.stdout + result.stderr).lower()
+                return 'slavasoft' in combined or 'fsum' in combined
 
-            # For other tools, try --help or --version
+            # For other tools, try --help or --version; usage text or the
+            # tool's own name in EITHER stream counts
             for flag in ['--help', '--version', '-h']:
                 try:
                     result = subprocess.run([tool, flag], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
-                    if result.returncode == 0 or 'usage' in result.stderr.lower():
+                    combined = (result.stdout + result.stderr).lower()
+                    if result.returncode == 0 or 'usage' in combined or tool.lower() in combined:
                         return True
+                except FileNotFoundError:
+                    return False  # tool absent -- no point trying more flags
                 except Exception:
                     continue
 
@@ -186,11 +221,19 @@ class DazzleHashCalculator:
 
     def calculate_file_hash(self, file_path: Path) -> str:
         """Calculate hash for a single file."""
-        # Normalize path using unctools if available
-        if HAVE_UNCTOOLS:
-            file_path = normalize_path(file_path)
+        # (The old HAVE_UNCTOOLS normalize_path gate was dead code: the flag
+        # was always False on modern unctools, and the fallback was a no-op.
+        # Hot paths deliberately do not normalize paths -- v1.5.0.)
 
-        # Try native tool first
+        # Python hashlib first: in-process (no per-file subprocess spawn)
+        # and the only engine that applies line-ending normalization, so
+        # a native tool's raw-byte digest would not even match existing
+        # manifests for CRLF text files.
+        if self._hashlib_supported:
+            return self._calculate_with_python(file_path)
+
+        # Algorithm outside hashlib: fall back to a native tool (raw-byte
+        # hashing, no normalization).
         if self.native_tool:
             try:
                 return self._calculate_with_native_tool(file_path)
@@ -198,17 +241,18 @@ class DazzleHashCalculator:
                 # Only log warning in debug mode to reduce noise
                 logger.debug(f"Native tool {self.native_tool} failed for {file_path}, using Python: {e}")
 
-        # Fallback to Python implementation
+        # Last resort: lets hashlib raise its informative unsupported-algorithm error
         return self._calculate_with_python(file_path)
 
     def calculate_hashes(self, file_path: Path) -> HashResultDict:
         """Calculate this file's hash in the DazzleLib cross-layer shape.
 
         The ecosystem-boundary form of :meth:`calculate_file_hash`: the same
-        computation (native tool first, normalized Python fallback), returned
-        as ``dazzle_lib.HashResultDict`` -- hex digests keyed by algorithm
-        name, e.g. ``{'sha256': 'ab12...'}`` -- the shape produced by filekit
-        ``verification.calculate_file_hash`` and consumed across the stack.
+        computation (normalized Python hashlib first, native tool only for
+        algorithms hashlib lacks), returned as ``dazzle_lib.HashResultDict``
+        -- hex digests keyed by algorithm name, e.g. ``{'sha256': 'ab12...'}``
+        -- the shape produced by filekit ``verification.calculate_file_hash``
+        and consumed across the stack.
         """
         return {self.algorithm: self.calculate_file_hash(file_path)}
 
@@ -303,14 +347,13 @@ class DazzleHashCalculator:
         except ValueError:
             raise ValueError(f"Unsupported hash algorithm: {self.algorithm}")
 
-        # Use safe_open if available
+        # Plain open: the old HAVE_UNCTOOLS/safe_open branch was dead code
+        # (the unctools API it soft-imported no longer exists, so the flag
+        # was always False; safe_open's local fallback was open anyway).
+        # UNC-path handling now flows through dazzle-filekit (v1.5.0).
         try:
-            if HAVE_UNCTOOLS:
-                with safe_open(file_path, 'rb') as f:
-                    return self._hash_file_content(f, hasher)
-            else:
-                with open(file_path, 'rb') as f:
-                    return self._hash_file_content(f, hasher)
+            with open(file_path, 'rb') as f:
+                return self._hash_file_content(f, hasher)
         except Exception as e:
             logger.error(f"Error reading file {file_path}: {e}")
             raise

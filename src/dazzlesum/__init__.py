@@ -53,9 +53,9 @@ from .constants import (  # noqa: F401
     STATE_FILENAME,
     SUPPORTED_ALGORITHMS,
     file_exists,
+    is_unc_path,
     is_windows,
     logger,
-    normalize_path,
     safe_open,
 )
 from . import state  # noqa: F401

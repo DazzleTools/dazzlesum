@@ -1,10 +1,11 @@
-# Project dependencies
-# Dazzlesum is designed to work with Python standard library only
-# No required dependencies for basic functionality
-
-# Optional dependencies for enhanced functionality
-# Enhanced Windows UNC path handling (optional)
-git+https://github.com/djdarcy/UNCtools.git
+# Runtime dependencies (authoritative list lives in pyproject.toml)
+# The pip-installed package depends on the DazzleLib stack since v1.5.0:
+dazzle-lib>=0.6.7
+dazzle-filekit>=0.3.2
+# (filekit's UNC-aware path layer is itself backed by unctools>=0.2.2 --
+#  dazzlesum no longer depends on unctools directly. The single-file
+#  dazzlesum.py artifact needs NONE of these: it is stitched at build time
+#  and runs on the standard library alone.)
 
 # Development dependencies (for contributors)
 pytest>=7.0.0

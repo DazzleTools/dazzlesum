@@ -4,10 +4,10 @@ This guide covers all installation methods for dazzlesum across different platfo
 
 ## System Requirements
 
-- **Python**: 3.7 or higher
+- **Python**: 3.9 or higher
 - **Operating System**: Windows, macOS, Linux, BSD
-- **Dependencies**: None (pure Python standard library)
-- **Optional**: [`unctools` package](https://github.com/djdarcy/UNCtools) for enhanced Windows UNC path support
+- **Dependencies** (pip package): `dazzle-lib` and `dazzle-filekit`, installed automatically by pip; filekit's UNC-aware path layer is backed by [`unctools`](https://github.com/djdarcy/UNCtools)
+- **Dependencies** (single-file `dazzlesum.py`): none -- the stitched artifact runs on the standard library alone
 
 ## Installation Methods
 
@@ -39,7 +39,7 @@ This installs in "editable" mode, so changes to the source code take effect imme
 
 ### Download Single File
 
-For portable use without installation:
+For portable use without installation -- the single file is generated from the `src/` package at build time and is fully self-contained (standard library only, no dependencies):
 
 ```bash
 # Download the script
