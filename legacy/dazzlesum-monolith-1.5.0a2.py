@@ -28,14 +28,6 @@ Examples:
     dazzle-checksum.py --monolithic --output checksums.sha256  # Custom output
 """
 
-# ===========================================================================
-# GENERATED FILE -- DO NOT EDIT BY HAND.
-#
-# This single-file artifact is stitched from the src/dazzlesum/ package by
-# scripts/build_monolith.py. Edit the package modules and rerun:
-#     python scripts/build_monolith.py
-# ===========================================================================
-
 import os
 import sys
 import re
@@ -55,201 +47,38 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
-# In this stitched single-file build, the package's shared-state module
-# (src/dazzlesum/state.py) collapses into this module's own globals; binding
-# `state` to the module object makes every `state.<name>` reference below
-# read and write those globals, exactly as the pre-split monolith did.
-state = sys.modules[__name__]
-
-
-# ===========================================================================
-# Vendored DazzleLib objects (generated -- see scripts/build_monolith.py)
-#
-# The src/ package imports these from the installed dazzle-lib /
-# dazzle-filekit libraries (hard dependencies since v1.5.0-alpha.4). The
-# single-file artifact must stay self-contained, so the exact objects used
-# are inlined here at build time from the installed library source. Free
-# module-level names they reference (e.g. ``logger``) bind to this
-# artifact's globals.
-# ===========================================================================
-
-
-# ---- vendored: dazzle_filekit.is_windows (dazzle-filekit 0.4.2) ----
-def is_windows():
-    """Self-contained artifact equivalent of dazzle_filekit.is_windows."""
-    return os.name == 'nt'
-
-
-# ---- vendored: dazzle_filekit.paths.is_unc_path (dazzle-filekit 0.4.2) ----
-def is_unc_path(path):
-    """Self-contained artifact equivalent of dazzle_filekit.paths.is_unc_path
-    (approximation: UNC = leading double separator; the package uses the
-    real resolver-aware implementation)."""
-    s = str(path)
-    return s.startswith('\\\\') or s.startswith('//')
-
-
-# ---- vendored: dazzle_filekit.operations.open_file (dazzle-filekit 0.4.2) ----
-def open_file(path, mode='r', *args, **kwargs):
-    """Self-contained artifact equivalent of dazzle_filekit.operations.open_file
-    (plain open; the package version adds UNC variant-resolution fallback)."""
-    return open(path, mode, *args, **kwargs)
-safe_open = open_file
-
-
-# ---- vendored: dazzle_filekit.utils.compat.path_exists_cross_platform (dazzle-filekit 0.4.2) ----
-def path_exists_cross_platform(path):
-    """Self-contained artifact equivalent of
-    dazzle_filekit.utils.compat.path_exists_cross_platform."""
-    return Path(path).exists()
-file_exists = path_exists_cross_platform
-
-
-# ---- vendored: dazzle_lib.HashResultDict (dazzle-lib 0.8.2) ----
-HashResultDict = Dict[str, str]
-"""Hash results keyed by algorithm name, hex digests as values
-(alias of dazzle_lib.payloads.HashResultDict)."""
-
-
-# ---- vendored: dazzle_filekit.paths.compute_relative_path (dazzle-filekit 0.4.2) ----
-def compute_relative_path(
-    target: Union[str, Path],
-    start: Union[str, Path],
-    fallback_to_absolute: bool = True
-) -> Optional[str]:
-    """
-    Compute the relative path FROM ``start`` TO ``target`` via os.path.relpath.
-
-    This is the ``..``-traversing relative path between two arbitrary locations --
-    the operation needed to store a link's target relative to the link's own
-    directory. It is distinct from :func:`get_relative_path`, which uses
-    ``Path.relative_to`` and only succeeds when ``target`` is a *subpath* of
-    ``start`` (returning None for siblings). For example, with
-    target ``/a/b/c`` and start ``/a/x``:
-
-    * ``compute_relative_path`` -> ``"../b/c"``
-    * ``get_relative_path``     -> ``None`` (not a subpath)
-
-    Args:
-        target: The path being pointed at.
-        start: The reference location, typically the link's parent directory.
-        fallback_to_absolute: On a cross-drive ValueError (Windows), return the
-            absolute target instead of None.
-
-    Returns:
-        The relative path as a string, the absolute target on a cross-drive
-        fallback, or None.
-    """
-    target_abs = os.path.abspath(str(target))
-    start_abs = os.path.abspath(str(start))
-    try:
-        return os.path.relpath(target_abs, start_abs)
-    except ValueError:
-        # os.path.relpath raises ValueError across drives on Windows.
-        logger.debug(f"Cannot compute relative path (cross-drive): {target_abs} from {start_abs}")
-        return target_abs if fallback_to_absolute else None
-
-
-# ---- vendored: dazzle_filekit.operations.atomic_write_text (dazzle-filekit 0.4.2) ----
-def atomic_write_text(
-    path: Union[str, Path],
-    content: str,
-    *,
-    encoding: str = "utf-8",
-    newline: Optional[str] = None,
-) -> None:
-    """Atomically write text content to ``path``.
-
-    Writes ``content`` to a sibling ``.tmp`` file and then renames it to
-    ``path`` via ``os.replace`` (atomic on POSIX and Windows since Python 3.3).
-    Readers observing the file see either the old contents or the new
-    contents -- never a partial write.
-
-    Creates parent directories if they don't exist.
-
-    Args:
-        path: Destination file path.
-        content: Text content to write.
-        encoding: Text encoding (keyword-only, default ``utf-8``).
-        newline: Newline translation, passed to ``open()`` (keyword-only,
-            default None = universal).
-
-    Raises:
-        OSError: If the write or rename fails. The ``.tmp`` file is left
-            in place for inspection.
-
-    Pattern source: ``safedel/_store.py:_save_manifest`` and
-    ``safedel/_volumes.py:save_registry`` both used this idiom; this
-    function centralizes it.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp_path, "w", encoding=encoding, newline=newline) as f:
-        f.write(content)
-    # Windows: antivirus/indexers briefly lock freshly-written files, so a
-    # first os.replace can fail with PermissionError [WinError 5] even
-    # though nothing of ours holds the file (observed in the wild: one
-    # random victim test per dazzlecmd full-suite run). A short bounded
-    # retry absorbs the transient; a REAL permission problem still
-    # surfaces after ~0.3s total.
-    for attempt in range(6):
-        try:
-            os.replace(str(tmp_path), str(path))
-            break
-        except PermissionError:
-            if attempt == 5:
-                raise
-            time.sleep(0.01 * (2 ** attempt))  # 10..160ms backoff
-
-
-# ==========================================================================
-# ---- src/dazzlesum/_version.py -------------------------------------
-#      (monolith 3511c56 lines 50-64)
-# ==========================================================================
 # Version information
 # Base semantic version -- managed by scripts/repokit-common/sync-versions.py
 # (component-per-line form is what its parser expects)
 MAJOR = 1
 MINOR = 5
 PATCH = 0
-PHASE = "alpha"  # Per-MINOR feature set: None, "alpha", "beta", "rc1", etc.
-PRE_RELEASE_NUM = 7
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0-alpha_phase1-src-split_98-20260802-73bae58c"
-
+__version__ = "1.5.0_scrub-rebuild_93-20260717-ed8ac752"
 
 def get_package_version():
     """Return PEP 440 compliant version for packaging (uses MAJOR.MINOR.PATCH)."""
     return f"{MAJOR}.{MINOR}.{PATCH}"
 
-
 __author__ = "Dustin Darcy"
 
-
-# ==========================================================================
-# ---- src/dazzlesum/constants.py ------------------------------------
-#      (monolith 3511c56 lines 66-98)
-# ==========================================================================
-# UNC-aware path handling comes THROUGH dazzle-filekit (a hard dependency
-# since v1.5.0-alpha.4), whose path-identity layer is itself backed by
-# unctools (filekit declares unctools>=0.2.2 as its L0). dazzlesum no longer
-# imports unctools directly: the original soft-import targeted a pre-0.2.0
-# unctools surface (normalize_path, unctools.operations.*) that later
-# versions removed, so it failed silently and HAVE_UNCTOOLS was False on
-# every modern install -- the "enhanced UNC handling" never actually ran
-# (v1.5.0 fix).
-
-# Kept True for API compatibility: UNC support is now unconditionally
-# available via filekit's unctools-backed layer.
-HAVE_UNCTOOLS = True
-
-# NOTE: normalize_path (a retired unctools-era compat name whose actual
-# behavior was always the no-op fallback) is REMOVED from the public surface
-# in 1.5.0; filekit's normalize_cross_platform_path serves the real use case
-# (user-input path normalization) and hot paths deliberately do not
-# normalize (see the v1.5.0 enumeration-optimization notes).
+# Try to import unctools for enhanced path handling
+try:
+    import unctools
+    from unctools import normalize_path, convert_to_local, is_unc_path
+    from unctools.utils import is_windows as unctools_is_windows, get_platform_info
+    from unctools.operations import safe_open, file_exists
+    HAVE_UNCTOOLS = True
+    # Use unctools function
+    def is_windows(): return unctools_is_windows
+except ImportError:
+    HAVE_UNCTOOLS = False
+    # Fallback implementations
+    def is_windows(): return os.name == 'nt'
+    def normalize_path(p): return Path(p)
+    def safe_open(p, *args, **kwargs): return open(p, *args, **kwargs)
+    def file_exists(p): return Path(p).exists()
 
 # Constants
 DEFAULT_ALGORITHM = 'sha256'
@@ -266,45 +95,9 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%H:%M:%S'
 )
-logger = logging.getLogger(__name__.split('.')[0])  # keep monolith-era logger name
+logger = logging.getLogger(__name__)
 
 
-# ==========================================================================
-# ---- src/dazzlesum/state.py ----------------------------------------
-#      (monolith 3511c56 lines 239-240, 398-399, 401-402, 404-405, 407-408, 718-719, 721-722)
-# ==========================================================================
-# Global logger instance - will be set up in main()
-dazzle_logger = None
-
-
-# Global color formatter instance - will be set up in main()
-color_formatter = None
-
-
-# Global exit code for verification operations - will be set by verification results
-verification_exit_code = 0
-
-
-# Global flag to track if this is an auto-detected command
-is_auto_detected_command = False
-
-
-# Global verbosity configuration instance
-verbosity_config = None
-
-
-# Global grand totals instance for recursive operations
-grand_totals = None
-
-
-# Global squelch settings for output filtering (initialized by verbosity system)
-squelch_settings = None
-
-
-# ==========================================================================
-# ---- src/dazzlesum/output.py ---------------------------------------
-#      (monolith 3511c56 lines 101-236, 243-395, 411-484, 487-506, 4767-4805)
-# ==========================================================================
 class DazzleLogger:
     """Enhanced logger with DOS-compatible verbosity levels and visual separation."""
 
@@ -350,18 +143,18 @@ class DazzleLogger:
 
     def error(self, msg):
         """Always show errors."""
-        if state.color_formatter:
+        if color_formatter:
             # Only colorize if message doesn't already have color codes
             if '\033[' not in msg:
-                msg = state.color_formatter.error(msg)
+                msg = color_formatter.error(msg)
         logger.error(msg)
 
     def warning(self, msg):
         """Always show warnings."""
-        if state.color_formatter:
+        if color_formatter:
             # Only colorize if message doesn't already have color codes
             if '\033[' not in msg:
-                msg = state.color_formatter.warning(msg)
+                msg = color_formatter.warning(msg)
         logger.warning(msg)
 
     def info(self, msg, level=1):
@@ -371,10 +164,10 @@ class DazzleLogger:
             return  # No output at all in silent mode
             
         if self._should_log(level):
-            if state.color_formatter and level == 0:
+            if color_formatter and level == 0:
                 # Only colorize level 0 info messages (important info)
                 if '\033[' not in msg:
-                    msg = state.color_formatter.info(msg)
+                    msg = color_formatter.info(msg)
             
             # In quiet mode, use print for level 0 messages since logger.info() is suppressed
             if self.quiet and level == 0:
@@ -441,6 +234,10 @@ class DazzleLogger:
             self.debug(f"Using native tool: {tool_name} for {algorithm}")
         else:
             self.debug(f"Using Python implementation for {algorithm}")
+
+
+# Global logger instance - will be set up in main()
+dazzle_logger = None
 
 
 class ColorFormatter:
@@ -598,6 +395,19 @@ class ColorFormatter:
         return self.colorize(text, 'purple', bold)
 
 
+# Global color formatter instance - will be set up in main()
+color_formatter = None
+
+# Global exit code for verification operations - will be set by verification results
+verification_exit_code = 0
+
+# Global flag to track if this is an auto-detected command
+is_auto_detected_command = False
+
+# Global verbosity configuration instance
+verbosity_config = None
+
+
 class VerbosityConfig:
     """Handles verbosity level configuration and environment variables."""
     
@@ -676,9 +486,10 @@ class VerbosityConfig:
 
 def initialize_squelch_from_verbosity(verbosity_level):
     """Set global squelch_settings based on verbosity level."""
+    global squelch_settings  # noqa: F824
     
-    if state.verbosity_config:
-        state.squelch_settings = state.verbosity_config.get_squelch_settings()
+    if verbosity_config:
+        squelch_settings = verbosity_config.get_squelch_settings()
     else:
         # Fallback if verbosity_config not available
         # Note: True means squelched (hidden), False means shown
@@ -692,136 +503,9 @@ def initialize_squelch_from_verbosity(verbosity_level):
              0: {'INFO': False, 'SUCCESS': True,  'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},  # noqa: E241,E131
             +1: {'INFO': False, 'SUCCESS': False, 'NO_SHASUM': False, 'EXTRA': False, 'MISSING': False, 'FAILS': False, 'SUMMARY': False},
         }
-        state.squelch_settings = VERBOSITY_SQUELCH_MAP.get(verbosity_level, VERBOSITY_SQUELCH_MAP[0])
+        squelch_settings = VERBOSITY_SQUELCH_MAP.get(verbosity_level, VERBOSITY_SQUELCH_MAP[0])
 
 
-def setup_logging(verbosity=0, quiet=False, show_log_types=None):
-    """Configure logging based on verbosity settings."""
-    if quiet:
-        level = logging.WARNING
-    elif verbosity >= 3:
-        level = logging.DEBUG
-    else:
-        level = logging.INFO
-
-    # Configure root logger
-    logging.getLogger().setLevel(level)
-
-    # Determine if we should show log type prefixes
-    # Priority: explicit parameter > environment variable > verbosity-based default
-    if show_log_types is not None:
-        use_log_types = show_log_types
-    elif os.environ.get('DAZZLESUM_SHOW_LOG_TYPES', '').lower() in ('1', 'true', 'yes'):
-        use_log_types = True
-    else:
-        # Clean output by default (verbosity 0), show log types for higher verbosity
-        use_log_types = verbosity >= 1
-
-    # Create formatter based on verbosity and log type preferences
-    if verbosity >= 3:
-        # Debug mode: full details including timestamps
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
-        )
-    elif use_log_types:
-        # Normal mode with log type prefixes
-        formatter = logging.Formatter('%(levelname)s - %(message)s')
-    else:
-        # Clean mode: just the message
-        formatter = logging.Formatter('%(message)s')
-
-    # Update handler formatter
-    for handler in logging.getLogger().handlers:
-        handler.setFormatter(formatter)
-        handler.setLevel(level)
-
-
-# ==========================================================================
-# ---- src/dazzlesum/patterns.py -------------------------------------
-#      (monolith 3511c56 lines 1458-1503, 1506-1509, 1512-1533)
-# ==========================================================================
-class CompiledPatternMatcher:
-    """String-level fast path for include/exclude pattern matching.
-
-    Path.match() in the per-file hot loop costs a Path allocation plus a
-    per-pattern parse for every file (3.37M files x 8 patterns on the
-    reference library). This compiles all BASENAME patterns (no '/') into one
-    alternation regex matched against the entry name string; multi-component
-    patterns (e.g. "Vault/Restricted/00 NO SCAN") are rare, sit outside
-    the per-file hot path, and keep exact Path.match semantics via fallback.
-
-    Case behavior mirrors pathlib: case-insensitive on Windows (Path.match
-    uses normcase), case-sensitive elsewhere. Equivalence with the legacy
-    per-pattern Path.match loop is pinned by tests.
-    """
-
-    def __init__(self, patterns):
-        import fnmatch as _fnmatch
-        self.patterns = list(patterns or [])
-        self.multi = [p for p in self.patterns if '/' in p.replace('\\', '/')]
-        basename = [p for p in self.patterns if p not in self.multi]
-        if basename:
-            joined = '|'.join(f'(?:{_fnmatch.translate(p)})' for p in basename)
-            flags = re.IGNORECASE if os.name == 'nt' else 0
-            self._name_re = re.compile(joined, flags)
-        else:
-            self._name_re = None
-
-    def matches_name(self, name: str) -> bool:
-        """True if the basename matches any basename pattern."""
-        return bool(self._name_re and self._name_re.match(name))
-
-    def matches_path(self, path: Path) -> bool:
-        """Full check: basename regex first, then multi-component fallback."""
-        if self._name_re and self._name_re.match(path.name):
-            return True
-        for pattern in self.multi:
-            if path.match(pattern):
-                return True
-        return False
-
-    def matches_multi(self, path: Path) -> bool:
-        """Check only the multi-component patterns (exact Path.match semantics)."""
-        for pattern in self.multi:
-            if path.match(pattern):
-                return True
-        return False
-
-
-def _always_excluded_name(filename: str) -> bool:
-    """Tool-owned files that must never be checksummed (string-only check)."""
-    return (filename in (SHASUM_FILENAME, STATE_FILENAME, SHASUM_FILENAME + '.tmp')
-            or filename.startswith(CACHE_FILENAME))
-
-
-def _should_include_file_simple(file_path: Path, include_patterns, exclude_patterns) -> bool:
-    """Simplified version of file inclusion check for counting."""
-    filename = file_path.name
-
-    # Always exclude our own files (CACHE_FILENAME prefix also covers
-    # SQLite sidecars like .dazzle-cache.sqlite-journal)
-    if _always_excluded_name(filename):
-        return False
-
-    # Apply exclude patterns
-    for pattern in exclude_patterns:
-        if file_path.match(pattern):
-            return False
-
-    # Apply include patterns (if any)
-    if include_patterns:
-        for pattern in include_patterns:
-            if file_path.match(pattern):
-                return True
-        return False
-
-    return True
-
-
-# ==========================================================================
-# ---- src/dazzlesum/results.py --------------------------------------
-#      (monolith 3511c56 lines 509-715, 1193-1306, 1309-1387, 4868-4921, 4924-4952)
-# ==========================================================================
 class GrandTotals:
     """Aggregate statistics across multiple directory verifications."""
     
@@ -930,19 +614,21 @@ class GrandTotals:
         status_text, exit_code, _, _ = calculate_verification_status(
             self.files_verified, self.files_failed, self.files_missing, self.files_extra
         )
+        global verification_exit_code
         # For recursive operations, the grand totals exit code should override
         # individual directory codes: overall repository health, not the worst
         # individual directory.
-        state.verification_exit_code = exit_code
+        verification_exit_code = exit_code
         return status_text, exit_code
 
     def display_grand_totals(self):
         """Display the grand totals summary."""
-        if not state.dazzle_logger:
+        global verbosity_config  # noqa: F824
+        if not dazzle_logger:
             return
             
         # Check if we're in silent mode - no output at all
-        if state.verbosity_config and state.verbosity_config.is_silent():
+        if verbosity_config and verbosity_config.is_silent():
             return
         
         # Calculate overall statistics
@@ -955,16 +641,16 @@ class GrandTotals:
         status_text, exit_code = self.finalize_exit_code()
 
         # Display header
-        state.dazzle_logger.info("", level=0)  # Blank line
-        if state.color_formatter:
-            header = state.color_formatter.grand_totals("=== GRAND TOTALS ===", bold=True)
+        dazzle_logger.info("", level=0)  # Blank line
+        if color_formatter:
+            header = color_formatter.grand_totals("=== GRAND TOTALS ===", bold=True)
         else:
             header = "=== GRAND TOTALS ==="
-        state.dazzle_logger.info(header, level=0)
+        dazzle_logger.info(header, level=0)
         
         # Directory summary with colored status words
-        if state.color_formatter:
-            processed_text = f"{state.color_formatter.bold_number(self.directories_processed)} processed"
+        if color_formatter:
+            processed_text = f"{color_formatter.bold_number(self.directories_processed)} processed"
         else:
             processed_text = f"{self.directories_processed} processed"
         
@@ -973,41 +659,41 @@ class GrandTotals:
         if self.directories_processed > 0:
             parts = []
             if self.directories_success > 0:
-                if state.color_formatter:
-                    parts.append(f"{state.color_formatter.bold_number(self.directories_success)} {state.color_formatter.success('success')}")
+                if color_formatter:
+                    parts.append(f"{color_formatter.bold_number(self.directories_success)} {color_formatter.success('success')}")
                 else:
                     parts.append(f"{self.directories_success} success")
             if self.directories_no_shasum > 0:
-                if state.color_formatter:
-                    parts.append(f"{state.color_formatter.bold_number(self.directories_no_shasum)} {state.color_formatter.info_secondary('no-shasum')}")
+                if color_formatter:
+                    parts.append(f"{color_formatter.bold_number(self.directories_no_shasum)} {color_formatter.info_secondary('no-shasum')}")
                 else:
                     parts.append(f"{self.directories_no_shasum} no-shasum")
             if self.directories_partial > 0:
-                if state.color_formatter:
-                    parts.append(f"{state.color_formatter.bold_number(self.directories_partial)} {state.color_formatter.extra('partial')}")
+                if color_formatter:
+                    parts.append(f"{color_formatter.bold_number(self.directories_partial)} {color_formatter.extra('partial')}")
                 else:
                     parts.append(f"{self.directories_partial} partial")
             if self.directories_failed > 0:
-                if state.color_formatter:
-                    parts.append(f"{state.color_formatter.bold_number(self.directories_failed)} {state.color_formatter.error('failed')}")
+                if color_formatter:
+                    parts.append(f"{color_formatter.bold_number(self.directories_failed)} {color_formatter.error('failed')}")
                 else:
                     parts.append(f"{self.directories_failed} failed")
             
             if parts:
                 dir_summary += f" ({', '.join(parts)})"
         
-        state.dazzle_logger.info(dir_summary, level=0)
+        dazzle_logger.info(dir_summary, level=0)
         
         # File summary with colored status
         total_files = self.files_verified + self.files_failed + self.files_missing + self.files_extra
         if total_files > 0:
             colored_status = format_status_with_colors(status_text, success_pct, failure_pct)
             
-            if state.color_formatter:
-                verified_text = f"{state.color_formatter.bold_number(self.files_verified)} {state.color_formatter.success('verified')}"
-                failed_text = f"{state.color_formatter.bold_number(self.files_failed)} {state.color_formatter.error('failed')}"
-                missing_text = f"{state.color_formatter.bold_number(self.files_missing)} {state.color_formatter.warning('missing')}"
-                extra_text = f"{state.color_formatter.bold_number(self.files_extra)} {state.color_formatter.extra('extra')}"
+            if color_formatter:
+                verified_text = f"{color_formatter.bold_number(self.files_verified)} {color_formatter.success('verified')}"
+                failed_text = f"{color_formatter.bold_number(self.files_failed)} {color_formatter.error('failed')}"
+                missing_text = f"{color_formatter.bold_number(self.files_missing)} {color_formatter.warning('missing')}"
+                extra_text = f"{color_formatter.bold_number(self.files_extra)} {color_formatter.extra('extra')}"
             else:
                 verified_text = f"{self.files_verified} verified"
                 failed_text = f"{self.files_failed} failed"
@@ -1015,1208 +701,27 @@ class GrandTotals:
                 extra_text = f"{self.files_extra} extra"
             
             file_summary = f"Files: {verified_text}, {failed_text}, {missing_text}, {extra_text} ({colored_status})"
-            state.dazzle_logger.info(file_summary, level=0)
+            dazzle_logger.info(file_summary, level=0)
         
         # Processing time and throughput
         if processing_time > 0:
             time_summary = f"Processing: {processing_time:.2f} seconds"
             if throughput > 0:
                 time_summary += f" ({throughput} files/sec)"
-            if state.color_formatter:
-                colored_time_summary = state.color_formatter.grand_totals(time_summary)
+            if color_formatter:
+                colored_time_summary = color_formatter.grand_totals(time_summary)
             else:
                 colored_time_summary = time_summary
-            state.dazzle_logger.info(colored_time_summary, level=0)
+            dazzle_logger.info(colored_time_summary, level=0)
 
 
-class ProgressTracker:
-    """Track progress with percentage completion and ETA."""
+# Global grand totals instance for recursive operations
+grand_totals = None
 
-    def __init__(self, total_dirs=0, total_files=0, show_progress=True):
-        self.total_dirs = total_dirs
-        self.total_files = total_files
-        self.processed_dirs = 0
-        self.processed_files = 0
-        self.processed_bytes = 0
-        self.show_progress = show_progress
-        self.start_time = time.time()
-        self.last_update = 0
-        self.update_interval = 0.5  # Update every 500ms
+# Global squelch settings for output filtering (initialized by verbosity system)
+squelch_settings = None
 
-    def update_dirs(self, count=1):
-        """Update directory progress."""
-        self.processed_dirs += count
-        self._maybe_display_progress()
 
-    def update_files(self, count=1, file_size=0):
-        """Update file progress."""
-        self.processed_files += count
-        self.processed_bytes += file_size
-        self._maybe_display_progress()
-
-    def _maybe_display_progress(self):
-        """Display progress if enough time has passed."""
-        if not self.show_progress:
-            return
-
-        now = time.time()
-        if now - self.last_update >= self.update_interval:
-            self.last_update = now
-            self._display_progress()
-
-    def _display_progress(self):
-        """Display current progress."""
-        if self.total_dirs == 0 and self.total_files == 0:
-            return
-
-        # Calculate overall progress
-        dir_weight = 0.1  # Directories are 10% of the work
-        file_weight = 0.9  # Files are 90% of the work
-
-        if self.total_dirs > 0 and self.total_files > 0:
-            dir_progress = (self.processed_dirs / self.total_dirs) * dir_weight
-            file_progress = (self.processed_files / self.total_files) * file_weight
-            overall_progress = dir_progress + file_progress
-        elif self.total_dirs > 0:
-            overall_progress = self.processed_dirs / self.total_dirs
-        else:
-            overall_progress = self.processed_files / self.total_files if self.total_files > 0 else 0
-
-        percentage = min(100, overall_progress * 100)
-
-        # Calculate ETA
-        elapsed = time.time() - self.start_time
-        if percentage > 0 and elapsed > 0:
-            eta_seconds = (elapsed / (percentage / 100)) - elapsed
-            eta_str = self._format_duration(eta_seconds) if eta_seconds > 0 else "calculating..."
-        else:
-            eta_str = "calculating..."
-
-        # Create progress bar
-        bar_width = 30
-        filled = int(bar_width * (percentage / 100))
-        bar = '#' * filled + '-' * (bar_width - filled)
-
-        # Format data throughput
-        data_str = self._format_bytes(self.processed_bytes)
-        if elapsed > 0 and self.processed_bytes > 0:
-            mbps = (self.processed_bytes / (1024 * 1024)) / elapsed
-            throughput_str = f"{mbps:.1f} MB/s"
-        else:
-            throughput_str = "-- MB/s"
-
-        # Print progress (overwrite previous line)
-        print(f"\r[{bar}] {percentage:5.1f}% | "
-              f"Dirs: {self.processed_dirs}/{self.total_dirs} | "
-              f"Files: {self.processed_files}/{self.total_files} | "
-              f"{data_str} ({throughput_str}) | "
-              f"ETA: {eta_str}", end='', flush=True)
-
-    @staticmethod
-    def _format_bytes(num_bytes):
-        """Format bytes in human-readable format."""
-        for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
-            if abs(num_bytes) < 1024.0:
-                return f"{num_bytes:.1f} {unit}"
-            num_bytes /= 1024.0
-        return f"{num_bytes:.1f} PB"
-
-    def _format_duration(self, seconds):
-        """Format duration in human-readable format."""
-        if seconds < 60:
-            return f"{seconds:.0f}s"
-        elif seconds < 3600:
-            return f"{seconds/60:.0f}m {seconds % 60:.0f}s"
-        else:
-            hours = int(seconds // 3600)
-            minutes = int((seconds % 3600) // 60)
-            return f"{hours}h {minutes}m"
-
-    def finish(self):
-        """Complete the progress display."""
-        if self.show_progress and (self.total_dirs > 0 or self.total_files > 0):
-            # Force final 100% display
-            self.processed_dirs = self.total_dirs
-            self.processed_files = self.total_files
-            self._display_progress()
-            
-            print()  # New line after progress bar
-            elapsed = time.time() - self.start_time
-            logger.info(f"Completed {self.processed_dirs} directories, {self.processed_files} files in {self._format_duration(elapsed)}")
-
-
-class SummaryCollector:
-    """Collect summary statistics during processing."""
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        """Reset all counters."""
-        self.dirs_processed = 0
-        self.files_processed = 0
-        self.files_skipped = 0
-        self.files_failed = 0
-        self.total_bytes = 0
-        self.verification_results = {
-            'verified': 0,
-            'failed': 0,
-            'missing': 0,
-            'extra': 0
-        }
-
-    def add_directory(self, file_count, skip_count, fail_count, total_bytes):
-        """Add statistics from a directory."""
-        self.dirs_processed += 1
-        self.files_processed += file_count
-        self.files_skipped += skip_count
-        self.files_failed += fail_count
-        self.total_bytes += total_bytes
-
-    def add_verification(self, results):
-        """Add verification results."""
-        if 'error' not in results:
-            self.verification_results['verified'] += len(results.get('verified', []))
-            self.verification_results['failed'] += len(results.get('failed', []))
-            self.verification_results['missing'] += len(results.get('missing', []))
-            self.verification_results['extra'] += len(results.get('extra', []))
-
-    def get_summary(self):
-        """Get summary statistics."""
-        return {
-            'directories': self.dirs_processed,
-            'files_processed': self.files_processed,
-            'files_skipped': self.files_skipped,
-            'files_failed': self.files_failed,
-            'total_bytes': self.total_bytes,
-            'verification': self.verification_results
-        }
-
-    def print_summary(self):
-        """Print a summary of operations."""
-        summary = self.get_summary()
-
-        print("\n" + "="*60)
-        print("OPERATION SUMMARY")
-        print("="*60)
-        print(f"Directories processed: {summary['directories']}")
-        print(f"Files processed:       {summary['files_processed']}")
-        if summary['files_skipped'] > 0:
-            print(f"Files skipped:         {summary['files_skipped']}")
-        if summary['files_failed'] > 0:
-            print(f"Files failed:          {summary['files_failed']}")
-        print(f"Total data processed:  {self._format_bytes(summary['total_bytes'])}")
-
-        # Verification summary
-        if any(summary['verification'].values()):
-            print(f"\nVerification results:")
-            print(f"  Verified:  {summary['verification']['verified']}")
-            print(f"  Failed:    {summary['verification']['failed']}")
-            print(f"  Missing:   {summary['verification']['missing']}")
-            print(f"  Extra:     {summary['verification']['extra']}")
-
-        print("="*60)
-
-    def _format_bytes(self, bytes_count):
-        """Format bytes in human-readable format."""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if bytes_count < 1024:
-                return f"{bytes_count:.1f} {unit}"
-            bytes_count /= 1024
-        return f"{bytes_count:.1f} PB"
-
-
-def calculate_verification_status(verified_count, failed_count, missing_count, extra_count):
-    """Calculate status label and exit code based on verification results.
-    
-    Args:
-        verified_count: Number of files that verified successfully
-        failed_count: Number of files that failed checksum verification
-        missing_count: Number of missing files
-        extra_count: Number of extra files found
-        
-    Returns:
-        tuple: (status_label, exit_code, success_percentage, failure_percentage)
-    """
-    total_expected = verified_count + failed_count + missing_count
-    
-    # Handle edge case where no files were expected
-    if total_expected == 0:
-        if extra_count > 0:
-            return "0%/100% UNEXPECTED FILES", 4, 0, 100
-        else:
-            return "100%/0% SUCCESS", 0, 100, 0
-    
-    # Calculate success/failure percentages
-    # Consider missing and failed files as failures
-    failure_count = failed_count + missing_count
-    success_percentage = round((verified_count / total_expected) * 100)
-    failure_percentage = round((failure_count / total_expected) * 100)
-    
-    # Determine status label and exit code based on success rate
-    if success_percentage == 100 and extra_count == 0:
-        status_label = "SUCCESS"
-        exit_code = 0
-    elif success_percentage == 100 and extra_count > 0:
-        status_label = "SUCCESS"  # All expected files verified, but has extras
-        exit_code = 2  # Not perfect due to extra files
-    elif success_percentage >= 99:
-        status_label = "ALMOST PERFECT"
-        exit_code = 2
-    elif success_percentage >= 95:
-        status_label = "SOME ISSUES"
-        exit_code = 3
-    elif success_percentage >= 80:
-        status_label = "FAILS"
-        exit_code = 4
-    elif success_percentage >= 50:
-        status_label = "MANY FAILS"
-        exit_code = 5
-    elif success_percentage > 0:
-        status_label = "MOSTLY FAILS"
-        exit_code = 6
-    else:
-        status_label = "FAILURE"
-        exit_code = 7
-    
-    return f"{success_percentage}%/{failure_percentage}% {status_label}", exit_code, success_percentage, failure_percentage
-
-
-def format_status_with_colors(status_text, success_percentage, failure_percentage):
-    """Apply colors to status text with green success % and red failure %.
-    
-    Args:
-        status_text: Full status text like "99%/1% ALMOST PERFECT"
-        success_percentage: Success percentage (0-100)
-        failure_percentage: Failure percentage (0-100)
-        
-    Returns:
-        Colored status text if colors enabled, otherwise plain text
-    """
-    if not state.color_formatter or not state.color_formatter.use_colors:
-        return status_text
-    
-    # Split the status text to colorize percentages
-    parts = status_text.split('%')
-    if len(parts) >= 3:
-        # Format: "99%/1% STATUS"
-        success_part = f"{parts[0]}%"
-        failure_part = f"{parts[1].split('/')[1]}%"
-        status_label = parts[2]
-        
-        colored_success = state.color_formatter.success(success_part)
-        colored_failure = state.color_formatter.error(failure_part)
-        
-        return f"{colored_success}/{colored_failure}{status_label}"
-    
-    # Fallback to original text if parsing fails
-    return status_text
-
-
-# ==========================================================================
-# ---- src/dazzlesum/hashing.py --------------------------------------
-#      (monolith 3511c56 lines 1536-1607, 1827-2055)
-# ==========================================================================
-class LineEndingHandler:
-    """Handles line ending normalization for consistent checksums across platforms."""
-
-    def __init__(self, strategy='auto'):
-        """
-        Initialize line ending handler.
-
-        Args:
-            strategy: 'auto', 'unix', 'windows', 'preserve'
-        """
-        self.strategy = strategy
-        self.text_extensions = {
-            '.txt', '.py', '.js', '.html', '.css', '.xml', '.json', '.yaml', '.yml',
-            '.md', '.rst', '.cfg', '.ini', '.conf', '.log', '.sql', '.sh', '.bat',
-            '.cmd', '.ps1', '.php', '.rb', '.pl', '.java', '.c', '.cpp', '.h',
-            '.hpp', '.cs', '.vb', '.go', '.rs', '.swift', '.kt', '.scala'
-        }
-
-    def should_normalize(self, file_path: Path) -> bool:
-        """Determine if a file should have line ending normalization."""
-        if self.strategy == 'preserve':
-            return False
-
-        # Check file extension
-        if file_path.suffix.lower() in self.text_extensions:
-            return True
-
-        # Auto-detect by reading first few bytes
-        try:
-            with open(file_path, 'rb') as f:
-                sample = f.read(1024)
-                if not sample:
-                    return False
-
-                # Check for null bytes (indicates binary)
-                if b'\x00' in sample:
-                    return False
-
-                # Check for text-like content
-                try:
-                    sample.decode('utf-8')
-                    return True
-                except UnicodeDecodeError:
-                    try:
-                        sample.decode('latin-1')
-                        return True
-                    except UnicodeDecodeError:
-                        return False
-        except Exception:
-            return False
-
-    def normalize_content(self, content: bytes) -> bytes:
-        """Normalize line endings in content."""
-        if self.strategy == 'preserve':
-            return content
-
-        try:
-            # Decode to string
-            text = content.decode('utf-8')
-        except UnicodeDecodeError:
-            try:
-                text = content.decode('latin-1')
-            except UnicodeDecodeError:
-                return content  # Can't decode, return as-is
-
-        # Normalize line endings
-        if self.strategy == 'unix' or self.strategy == 'auto':
-            text = text.replace('\r\n', '\n').replace('\r', '\n')
-        elif self.strategy == 'windows':
-            text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
-
-        return text.encode('utf-8')
-
-
-class DazzleHashCalculator:
-    """Main hash calculator with normalization and native tool integration."""
-
-    def __init__(self, algorithm=DEFAULT_ALGORITHM, line_ending_strategy='auto',
-                 chunk_size=DEFAULT_CHUNK_SIZE):
-        self.algorithm = algorithm.lower()
-        self.chunk_size = chunk_size
-        self.line_handler = LineEndingHandler(line_ending_strategy)
-        # Python hashlib is the primary engine: it is in-process (native
-        # tools cost a per-file subprocess spawn -- ~75ms measured for
-        # certutil, a >100x slowdown on small files) and it is the only
-        # engine that applies line-ending normalization, so it is the
-        # engine every existing manifest was built with. Native tools are
-        # probed only when hashlib lacks the algorithm.
-        self._hashlib_supported = self._hashlib_supports(self.algorithm)
-        if self._hashlib_supported:
-            self.native_tool = None
-            if state.dazzle_logger:
-                state.dazzle_logger.tool_selection(None, self.algorithm)
-            else:
-                logger.debug(f"Using Python implementation for {self.algorithm}")
-        else:
-            self.native_tool = self._detect_native_tool()
-
-    @staticmethod
-    def _hashlib_supports(algorithm: str) -> bool:
-        """True when hashlib can construct this algorithm."""
-        try:
-            hashlib.new(algorithm)
-            return True
-        except (ValueError, TypeError):
-            return False
-
-    def _detect_native_tool(self) -> Optional[str]:
-        """Detect available native checksum tools."""
-        tools_to_try = []
-
-        if is_windows():
-            tools_to_try = ['fsum', 'certutil']
-        else:
-            if self.algorithm == 'sha256':
-                tools_to_try = ['sha256sum', 'shasum']
-            elif self.algorithm == 'sha1':
-                tools_to_try = ['sha1sum', 'shasum']
-            elif self.algorithm == 'md5':
-                tools_to_try = ['md5sum', 'md5']
-            elif self.algorithm == 'sha512':
-                tools_to_try = ['sha512sum', 'shasum']
-
-        for tool in tools_to_try:
-            if self._tool_available(tool):
-                if state.dazzle_logger:
-                    state.dazzle_logger.tool_selection(tool, self.algorithm)
-                else:
-                    logger.debug(f"Using native tool: {tool}")
-                return tool
-
-        if state.dazzle_logger:
-            state.dazzle_logger.tool_selection(None, self.algorithm)
-        else:
-            logger.debug("No native tools available, using Python implementation")
-        return None
-
-    def _tool_available(self, tool: str) -> bool:
-        """Check if a native tool is available.
-
-        Detection reads BOTH output streams and does not trust exit codes:
-        real tools disagree wildly here -- certutil prints its usage text to
-        STDOUT with returncode 1, and fsum 2.51 prints its banner to STDERR
-        (both verified on real machines; the old stdout-only and
-        rc==0-or-usage-in-stderr checks rejected every native tool, silently
-        forcing the pure-Python hashing fallback everywhere).
-        """
-        try:
-            # Special handling for fsum: invoked bare, banner identifies it
-            if tool == 'fsum':
-                result = subprocess.run([tool], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
-                combined = (result.stdout + result.stderr).lower()
-                return 'slavasoft' in combined or 'fsum' in combined
-
-            # For other tools, try --help or --version; usage text or the
-            # tool's own name in EITHER stream counts
-            for flag in ['--help', '--version', '-h']:
-                try:
-                    result = subprocess.run([tool, flag], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
-                    combined = (result.stdout + result.stderr).lower()
-                    if result.returncode == 0 or 'usage' in combined or tool.lower() in combined:
-                        return True
-                except FileNotFoundError:
-                    return False  # tool absent -- no point trying more flags
-                except Exception:
-                    continue
-
-            return False
-        except Exception:
-            return False
-
-    def _calculate_with_native_tool(self, file_path: Path) -> str:
-        """Calculate hash using native tool."""
-        if not self.native_tool:
-            raise ValueError("No native tool available")
-
-        # Handle different tools
-        if self.native_tool == 'fsum':
-            return self._calculate_with_fsum(file_path)
-        elif self.native_tool == 'certutil':
-            return self._calculate_with_certutil(file_path)
-        elif self.native_tool.endswith('sum'):
-            return self._calculate_with_hashsum(file_path)
-        elif self.native_tool == 'shasum':
-            return self._calculate_with_shasum(file_path)
-        else:
-            raise ValueError(f"Unsupported native tool: {self.native_tool}")
-
-    def calculate_file_hash(self, file_path: Path) -> str:
-        """Calculate hash for a single file."""
-        # (The old HAVE_UNCTOOLS normalize_path gate was dead code: the flag
-        # was always False on modern unctools, and the fallback was a no-op.
-        # Hot paths deliberately do not normalize paths -- v1.5.0.)
-
-        # Python hashlib first: in-process (no per-file subprocess spawn)
-        # and the only engine that applies line-ending normalization, so
-        # a native tool's raw-byte digest would not even match existing
-        # manifests for CRLF text files.
-        if self._hashlib_supported:
-            return self._calculate_with_python(file_path)
-
-        # Algorithm outside hashlib: fall back to a native tool (raw-byte
-        # hashing, no normalization).
-        if self.native_tool:
-            try:
-                return self._calculate_with_native_tool(file_path)
-            except Exception as e:
-                # Only log warning in debug mode to reduce noise
-                logger.debug(f"Native tool {self.native_tool} failed for {file_path}, using Python: {e}")
-
-        # Last resort: lets hashlib raise its informative unsupported-algorithm error
-        return self._calculate_with_python(file_path)
-
-    def calculate_hashes(self, file_path: Path) -> HashResultDict:
-        """Calculate this file's hash in the DazzleLib cross-layer shape.
-
-        The ecosystem-boundary form of :meth:`calculate_file_hash`: the same
-        computation (normalized Python hashlib first, native tool only for
-        algorithms hashlib lacks), returned as ``dazzle_lib.HashResultDict``
-        -- hex digests keyed by algorithm name, e.g. ``{'sha256': 'ab12...'}``
-        -- the shape produced by filekit ``verification.calculate_file_hash``
-        and consumed across the stack.
-        """
-        return {self.algorithm: self.calculate_file_hash(file_path)}
-
-    def _calculate_with_fsum(self, file_path: Path) -> str:
-        """Calculate hash using Windows fsum tool."""
-        cmd = ['fsum', f'-{self.algorithm}', str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
-
-        if result.returncode != 0:
-            raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
-
-        # Parse fsum output - skip header lines and comments
-        lines = result.stdout.splitlines()
-        for line in lines:
-            line = line.strip()
-            # Skip empty lines, comment lines, and header lines
-            if not line or line.startswith(';') or line.startswith('SlavaSoft'):
-                continue
-
-            # Look for hash lines - they contain the filename with * prefix
-            if ' *' in line:
-                hash_value = line.split(' *')[0].strip()
-                return hash_value.lower()
-
-            # Alternative format: hash followed by space and filename
-            parts = line.split()
-            if len(parts) >= 2 and len(parts[0]) in [32, 40, 64, 128]:  # Common hash lengths
-                return parts[0].lower()
-
-        raise ValueError(f"Could not parse fsum output: {result.stdout}")
-
-    def _calculate_with_certutil(self, file_path: Path) -> str:
-        """Calculate hash using Windows certutil."""
-        algo_map = {'md5': 'MD5', 'sha1': 'SHA1', 'sha256': 'SHA256', 'sha512': 'SHA512'}
-        certutil_algo = algo_map.get(self.algorithm)
-
-        if not certutil_algo:
-            raise ValueError(f"Unsupported algorithm for certutil: {self.algorithm}")
-
-        cmd = ['certutil', '-hashfile', str(file_path), certutil_algo]
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
-
-        if result.returncode != 0:
-            raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
-
-        # Parse certutil output - hash is typically on the second non-empty line
-        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        for line in lines[1:]:  # Skip first line (filename)
-            # Remove spaces and check if it looks like a hash
-            clean_line = line.replace(' ', '').replace('\t', '')
-            if len(clean_line) in [32, 40, 64, 128] and all(c in '0123456789abcdefABCDEF' for c in clean_line):
-                return clean_line.lower()
-
-        raise ValueError(f"Could not parse certutil output: {result.stdout}")
-
-    def _calculate_with_hashsum(self, file_path: Path) -> str:
-        """Calculate hash using Unix *sum tools."""
-        cmd = [self.native_tool, str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
-
-        if result.returncode != 0:
-            raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
-
-        # Parse output (first field is hash)
-        first_line = result.stdout.strip().split('\n')[0]
-        hash_value = first_line.split()[0]
-        return hash_value.lower()
-
-    def _calculate_with_shasum(self, file_path: Path) -> str:
-        """Calculate hash using shasum tool."""
-        algo_map = {'sha1': '1', 'sha256': '256', 'sha512': '512'}
-        shasum_algo = algo_map.get(self.algorithm)
-
-        if not shasum_algo:
-            raise ValueError(f"Unsupported algorithm for shasum: {self.algorithm}")
-
-        cmd = ['shasum', f'-a{shasum_algo}', str(file_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
-
-        if result.returncode != 0:
-            raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
-
-        # Parse output (first field is hash)
-        first_line = result.stdout.strip().split('\n')[0]
-        hash_value = first_line.split()[0]
-        return hash_value.lower()
-
-    def _calculate_with_python(self, file_path: Path) -> str:
-        """Calculate hash using Python hashlib."""
-        try:
-            hasher = hashlib.new(self.algorithm)
-        except ValueError:
-            raise ValueError(f"Unsupported hash algorithm: {self.algorithm}")
-
-        # Plain open: the old HAVE_UNCTOOLS/safe_open branch was dead code
-        # (the unctools API it soft-imported no longer exists, so the flag
-        # was always False; safe_open's local fallback was open anyway).
-        # UNC-path handling now flows through dazzle-filekit (v1.5.0).
-        try:
-            with open(file_path, 'rb') as f:
-                return self._hash_file_content(f, hasher)
-        except Exception as e:
-            logger.error(f"Error reading file {file_path}: {e}")
-            raise
-
-    def _hash_file_content(self, file_obj, hasher) -> str:
-        """Hash file content with optional normalization."""
-        # Check if we should normalize line endings
-        first_chunk = file_obj.read(self.chunk_size)
-        if not first_chunk:
-            return hasher.hexdigest()
-
-        # Reset file pointer
-        file_obj.seek(0)
-
-        # Determine if we should normalize
-        temp_path = Path(file_obj.name) if hasattr(file_obj, 'name') else None
-        should_normalize = (temp_path and
-                          self.line_handler.should_normalize(temp_path))
-
-        if should_normalize:
-            # Read entire file and normalize
-            content = file_obj.read()
-            normalized_content = self.line_handler.normalize_content(content)
-            hasher.update(normalized_content)
-        else:
-            # Stream processing for large files
-            file_obj.seek(0)
-            while True:
-                chunk = file_obj.read(self.chunk_size)
-                if not chunk:
-                    break
-                hasher.update(chunk)
-
-        return hasher.hexdigest()
-
-
-# ==========================================================================
-# ---- src/dazzlesum/walk.py -----------------------------------------
-#      (monolith 3511c56 lines 1390-1455, 1610-1738, 1741-1824)
-# ==========================================================================
-def count_dirs_and_files(root_path: Path, include_patterns, exclude_patterns,
-                        follow_symlinks=False, recursive=True) -> Tuple[int, int]:
-    """Pre-walk directory tree to count directories and files.
-    
-    Args:
-        root_path: Root directory to count from
-        include_patterns: Patterns for files to include
-        exclude_patterns: Patterns for files to exclude  
-        follow_symlinks: Whether to follow symbolic links
-        recursive: Whether to count subdirectories recursively
-        
-    Returns:
-        Tuple of (directory_count, file_count)
-    """
-    symlink_handler = SymlinkHandler()
-    total_dirs = 0
-    total_files = 0
-
-    # Use a simple queue for counting
-    dirs_to_visit = deque([root_path])
-
-    while dirs_to_visit:
-        current_dir = dirs_to_visit.popleft()
-
-        # Skip if already visited (loop detection)
-        if symlink_handler.is_visited(current_dir):
-            continue
-        symlink_handler.mark_visited(current_dir)
-
-        # Skip if we shouldn't follow this link
-        if not symlink_handler.should_follow_link(current_dir, follow_symlinks):
-            continue
-
-        try:
-            total_dirs += 1
-
-            # Periodic progress during counting (every 500 dirs)
-            if total_dirs % 500 == 0:
-                print(f"\r  Counting... {total_dirs:,} dirs, {total_files:,} files", end="", flush=True)
-
-            # Count files in this directory
-            for item in current_dir.iterdir():
-                if item.is_file():
-                    # Apply same filtering logic as main processor
-                    if _should_include_file_simple(item, include_patterns, exclude_patterns):
-                        total_files += 1
-                elif item.is_dir() and not symlink_handler.is_visited(item):
-                    if recursive:
-                        # Skip excluded directories (same patterns used for files)
-                        dir_name = item.name
-                        skip = False
-                        for pattern in exclude_patterns:
-                            if dir_name == pattern or item.match(pattern):
-                                skip = True
-                                break
-                        if not skip:
-                            dirs_to_visit.append(item)
-        except Exception:
-            # Skip directories we can't access
-            continue
-
-    # Clear the counting line if we printed any updates
-    if total_dirs >= 100:
-        print("\r" + " " * 60 + "\r", end="", flush=True)
-
-    return total_dirs, total_files
-
-
-class SymlinkHandler:
-    """Handles symlink and junction detection with loop prevention."""
-
-    def __init__(self):
-        self.visited_inodes = set()
-        self.visited_paths = set()
-
-    def is_symlink_or_junction(self, path: Path) -> Tuple[bool, Optional[str]]:
-        """Detect symlinks and Windows junctions."""
-        try:
-            # Standard symlink detection
-            if path.is_symlink():
-                return True, 'symlink'
-
-            # Windows junction detection
-            if is_windows() and path.is_dir() and self._is_junction(path):
-                return True, 'junction'
-
-        except Exception as e:
-            logger.debug(f"Error checking symlink status for {path}: {e}")
-
-        return False, None
-
-    def _is_junction(self, path: Path) -> bool:
-        """Detect Windows junctions via reparse-point attributes.
-
-        Pure lstat -- no subprocess, no resolve(). The previous implementation
-        shelled out to `dir /AL` for every NON-junction directory (~60ms each,
-        hours at library scale) and misclassified any directory reached
-        through a junction ancestor because resolve() != path for all of them.
-        """
-        try:
-            # Python 3.12+ has a dedicated check (reparse tag == mount point)
-            if hasattr(path, 'is_junction'):
-                return path.is_junction()
-
-            stat_info = os.lstat(str(path))
-            attrs = getattr(stat_info, 'st_file_attributes', 0)
-            reparse = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x0400)
-            # Symlinks were already handled by the caller; any remaining
-            # directory reparse point (junction, mount point) should not be
-            # traversed by default.
-            return bool(attrs & reparse)
-        except OSError as e:
-            logger.debug(f"Error detecting junction for {path}: {e}")
-            return False
-
-    def should_follow_link(self, path: Path, follow_symlinks: bool = False) -> bool:
-        """Determine if we should follow this link."""
-        is_link, link_type = self.is_symlink_or_junction(path)
-
-        if not is_link:
-            return True  # Regular file/directory
-
-        if not follow_symlinks:
-            return False  # User doesn't want to follow links
-
-        # Additional safety checks for links
-        try:
-            target = path.resolve()
-            # Ensure target exists and isn't pointing to parent
-            return target.exists() and not self._is_parent_loop(path, target)
-        except (OSError, RuntimeError):
-            return False  # Broken or dangerous link
-
-    def _is_parent_loop(self, link_path: Path, target_path: Path) -> bool:
-        """Check if target is a parent of the link (potential loop)."""
-        try:
-            link_path.relative_to(target_path)
-            return True  # link is inside target - potential loop
-        except ValueError:
-            return False  # No parent relationship
-
-    def check_and_mark_walk_path(self, path: Path) -> bool:
-        """Cheap duplicate guard for physical (non-link-following) walks.
-
-        Returns True if the path was already seen. Keys by the walk path
-        STRING only -- no resolve(), no stat(). When links are not followed,
-        a BFS over physical directories cannot revisit a directory except by
-        being enqueued twice with the same path, so inode tracking (which
-        cost 4 syscalls per directory AND caused real directories to be
-        skipped when a junction elsewhere in the tree pointed at them --
-        their inodes got marked through the junction) is wrong here. Inode
-        loop-protection belongs only to link-FOLLOWING walks.
-        """
-        key = str(path)
-        if key in self.visited_paths:
-            return True
-        self.visited_paths.add(key)
-        return False
-
-    def mark_visited(self, path: Path):
-        """Mark a path as visited for loop detection."""
-        # Mark by resolved path
-        try:
-            resolved_path = str(path.resolve())
-            self.visited_paths.add(resolved_path)
-        except Exception:
-            self.visited_paths.add(str(path))
-
-        # Mark by inode (if available)
-        try:
-            stat_info = path.stat()
-            inode_key = (stat_info.st_dev, stat_info.st_ino)
-            self.visited_inodes.add(inode_key)
-        except (OSError, AttributeError):
-            pass  # Can't get inode info, path marking is sufficient
-
-    def is_visited(self, path: Path) -> bool:
-        """Check if we've already visited this path/inode."""
-        # Check by resolved path
-        try:
-            resolved_path = str(path.resolve())
-            if resolved_path in self.visited_paths:
-                return True
-        except Exception:
-            if str(path) in self.visited_paths:
-                return True
-
-        # Check by inode (if available)
-        try:
-            stat_info = path.stat()
-            inode_key = (stat_info.st_dev, stat_info.st_ino)
-            if inode_key in self.visited_inodes:
-                return True
-        except (OSError, AttributeError):
-            pass
-
-        return False
-
-
-class FIFODirectoryWalker:
-    """FIFO directory processor for memory-efficient traversal."""
-
-    def __init__(self, follow_symlinks=False, exclude_patterns=None):
-        self.processing_queue = deque()
-        self.symlink_handler = SymlinkHandler()
-        self.follow_symlinks = follow_symlinks
-        self.exclude_patterns = exclude_patterns or []
-        self._exclude_matcher = CompiledPatternMatcher(self.exclude_patterns)
-        self.processed_count = 0
-
-    def _is_excluded_dir(self, item: Path) -> bool:
-        """Match a directory against exclude patterns (same Path.match
-        semantics as file exclusion). Historically --exclude only filtered
-        FILES by name -- traversal descended into .git, .private, etc. and
-        checksummed their contents, since files inside an excluded directory
-        don't themselves match the directory's pattern.
-
-        v1.5.0: basename patterns via one compiled regex on the dir NAME;
-        multi-component patterns keep exact Path.match semantics."""
-        m = self._exclude_matcher
-        if m.matches_name(item.name):
-            return True
-        if m.multi and m.matches_multi(item):
-            return True
-        return False
-
-    def walk_and_process(self, root_path: Path, processor_func, recursive=True):
-        """
-        FIFO directory processing with callback.
-
-        Args:
-            root_path: Starting directory
-            processor_func: Function to call for each directory
-            recursive: Whether to process subdirectories
-        """
-        self.processing_queue.append(root_path)
-
-        while self.processing_queue:
-            current_dir = self.processing_queue.popleft()
-
-            # Duplicate/loop guard. Physical walks (follow_symlinks=False)
-            # use the cheap string-key guard: inode marking followed links
-            # via stat() and caused real directories to be skipped whenever a
-            # junction elsewhere pointed at them (coverage hole, found
-            # 2026-07-17: an entire venv subtree invisible to every scan),
-            # and cost 4 syscalls per directory.
-            if self.follow_symlinks:
-                if self.symlink_handler.is_visited(current_dir):
-                    logger.warning(f"Skipping {current_dir} - already visited (loop detected)")
-                    continue
-                self.symlink_handler.mark_visited(current_dir)
-            elif self.symlink_handler.check_and_mark_walk_path(current_dir):
-                continue
-
-            # Check if we should follow this directory (symlink safety)
-            if not self.symlink_handler.should_follow_link(current_dir, self.follow_symlinks):
-                logger.debug(f"Skipping {current_dir} - symlink/junction not followed")
-                continue
-
-            # Process current directory
-            try:
-                if state.dazzle_logger:
-                    state.dazzle_logger.directory_start(current_dir)
-                else:
-                    logger.info(f"Processing directory: {current_dir}")
-                processor_func(current_dir)
-                self.processed_count += 1
-            except Exception as e:
-                logger.error(f"Error processing directory {current_dir}: {e}")
-                continue
-
-            # Add subdirectories to queue if recursive
-            if recursive:
-                try:
-                    subdirs = [item for item in current_dir.iterdir()
-                              if item.is_dir()
-                              and not self._is_excluded_dir(item)
-                              and not self.symlink_handler.is_visited(item)]
-                    for subdir in subdirs:
-                        self.processing_queue.append(subdir)
-                        logger.debug(f"Added to queue: {subdir}")
-                except Exception as e:
-                    logger.warning(f"Error listing subdirectories of {current_dir}: {e}")
-
-
-# ==========================================================================
-# ---- src/dazzlesum/shadow.py ---------------------------------------
-#      (monolith 3511c56 lines 2107-2187)
-# ==========================================================================
-class ShadowPathResolver:
-    """Resolves paths between source directories and shadow directory structure.
-    
-    The shadow directory feature allows keeping source directories clean by storing
-    all .shasum files in a parallel shadow directory structure.
-    
-    Example:
-        source_root: /data/projects/myproject/
-        shadow_root: /checksums/myproject/
-        
-        Source file: /data/projects/myproject/subdir/file.txt
-        Shadow .shasum: /checksums/myproject/subdir/.shasum
-    """
-    
-    def __init__(self, source_root: Path, shadow_root: Path):
-        self.source_root = Path(source_root).resolve()
-        self.shadow_root = Path(shadow_root).resolve()
-        
-        # Ensure shadow root directory exists
-        self.shadow_root.mkdir(parents=True, exist_ok=True)
-    
-    def get_shadow_shasum_path(self, source_dir: Path) -> Path:
-        """Get the shadow .shasum file path for a source directory.
-
-        Args:
-            source_dir: Source directory that would contain .shasum file
-
-        Returns:
-            Path to .shasum file in shadow directory structure
-
-        v1.5.0: fast path avoids the per-call Path.resolve() (an expensive
-        _getfinalpathname syscall, profiled at ~12s per 20K dirs) -- walker
-        paths already descend from the resolved source root. The resolve()
-        fallback keeps external callers with unnormalized paths correct.
-        """
-        try:
-            rel_path = Path(source_dir).relative_to(self.source_root)
-        except ValueError:
-            source_dir = Path(source_dir).resolve()
-            try:
-                rel_path = source_dir.relative_to(self.source_root)
-            except ValueError:
-                raise ValueError(
-                    f"Source directory {source_dir} is not under source root {self.source_root}")
-
-        # Create corresponding shadow directory path
-        shadow_dir = self.shadow_root / rel_path
-        return shadow_dir / SHASUM_FILENAME
-    
-    def get_source_file_path(self, shadow_relative_path: str) -> Path:
-        """Resolve a shadow-relative file path to the corresponding source file.
-        
-        Args:
-            shadow_relative_path: Relative path as stored in shadow .shasum file
-            
-        Returns:
-            Path to actual source file
-        """
-        return self.source_root / shadow_relative_path
-    
-    def ensure_shadow_directory(self, shadow_shasum_path: Path) -> None:
-        """Ensure the directory for a shadow .shasum file exists.
-        
-        Args:
-            shadow_shasum_path: Path to shadow .shasum file
-        """
-        shadow_shasum_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    def get_shadow_monolithic_path(self, algorithm: str, output_filename: Optional[str] = None) -> Path:
-        """Get path for monolithic checksum file in shadow directory.
-        
-        Args:
-            algorithm: Hash algorithm for default filename
-            output_filename: Optional custom filename
-            
-        Returns:
-            Path to monolithic checksum file in shadow root
-        """
-        if output_filename:
-            return self.shadow_root / output_filename
-        return self.shadow_root / f"{MONOLITHIC_DEFAULT_NAME}.{algorithm}"
-
-
-# ==========================================================================
-# ---- src/dazzlesum/statecache.py -----------------------------------
-#      (monolith 3511c56 lines 2190-2344)
-# ==========================================================================
-class StateCache:
-    """Per-machine (size, mtime_ns) state cache backing incremental updates.
-
-    Lives in ONE SQLite file at the shadow root (or the scan root when no
-    shadow dir is used). It is a disposable accelerator, NOT part of the
-    checksum record: hashes in .shasum files remain the only durable truth.
-    Delete the file and `update --bootstrap=...` rebuilds it.
-
-    Never sync or commit this file. Stat state (mtime especially) is only
-    meaningful on the machine that recorded it -- synced copies of a library
-    (e.g. via Resilio) carry origin mtimes that would poison another peer's
-    cache into silently skipping changed files.
-
-    Folder keys are POSIX-style paths relative to the scan root, so the cache
-    stays valid when the same tree is reached via different mounts
-    (drive letter, subst, UNC).
-    """
-
-    # Schema v2: folder paths are interned into `folders` (an integer id)
-    # instead of being repeated in every file row. On a multi-million-file
-    # library this shrinks the cache ~35-40% and, more importantly, keeps the
-    # (folder_id, name) primary-key b-tree far smaller than text keys.
-    SCHEMA_VERSION = 2
-    SCHEMA = """
-        CREATE TABLE IF NOT EXISTS folders (
-            id   INTEGER PRIMARY KEY,
-            path TEXT NOT NULL UNIQUE
-        );
-        CREATE TABLE IF NOT EXISTS file_state (
-            folder_id  INTEGER NOT NULL REFERENCES folders(id),
-            name       TEXT NOT NULL,
-            size       INTEGER NOT NULL,
-            mtime_ns   INTEGER NOT NULL,
-            algo       TEXT NOT NULL,
-            hash       TEXT NOT NULL,
-            scanned_at TEXT NOT NULL,
-            PRIMARY KEY (folder_id, name)
-        );
-    """
-
-    # Commit every N replace_folder() calls instead of every call. Each
-    # commit is a journal fsync; per-folder commits cost hours at library
-    # scale (measured: ~12% CPU, 88% fsync-blocked). The cache is a
-    # disposable accelerator, so losing the tail of a batch in a crash just
-    # means those folders re-seed on the next run. COMMIT_INTERVAL_S bounds
-    # the loss window in TIME as well: without it, a hard kill on a tree
-    # smaller than COMMIT_EVERY dirs forfeited the entire run's cache
-    # (adversarial finding, 2026-07-17). Ctrl-C always flushes via close().
-    COMMIT_EVERY = 200
-    COMMIT_INTERVAL_S = 5.0
-
-    def __init__(self, cache_path: Path):
-        self.cache_path = Path(cache_path)
-        self.conn = sqlite3.connect(str(self.cache_path), timeout=30.0)
-        self.conn.execute("PRAGMA busy_timeout = 30000")
-        # Disposable cache: durability guarantees are wasted on it (delete
-        # and re-bootstrap is always safe), so skip the per-commit fsyncs
-        # and keep the rollback journal in memory.
-        self.conn.execute("PRAGMA synchronous = OFF")
-        self.conn.execute("PRAGMA journal_mode = MEMORY")
-        self._ensure_schema()
-        self._pending = 0
-        self._last_commit = time.monotonic()
-        self._folder_ids: Dict[str, int] = {}
-
-    def _ensure_schema(self):
-        """Create the v2 schema; drop and rebuild any older layout (the cache
-        is regenerable by design, so there is no migration path -- just a
-        rebuild)."""
-        version = self.conn.execute("PRAGMA user_version").fetchone()[0]
-        if version != self.SCHEMA_VERSION:
-            self.conn.executescript(
-                "DROP TABLE IF EXISTS file_state; DROP TABLE IF EXISTS folders;")
-            self.conn.executescript(self.SCHEMA)
-            self.conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
-            self.conn.commit()
-
-    @staticmethod
-    def folder_key(directory: Path, root: Path) -> str:
-        """Stable per-tree key: POSIX relative path from scan root ('.' for root).
-
-        v1.5.0: pure string computation (os.path.relpath) -- the previous
-        Path.resolve().relative_to() cost TWO _getfinalpathname syscalls per
-        call (profiled at ~20s per 20K directories). Callers pass directories
-        descended from an already-resolved root (the walker guarantees this),
-        so no filesystem round-trip is needed.
-        """
-        rel = os.path.relpath(str(directory), str(root))
-        return '.' if rel == '.' else rel.replace('\\', '/')
-
-    def _folder_id(self, folder: str, create: bool = False) -> Optional[int]:
-        """Look up (optionally interning) the integer id for a folder path."""
-        fid = self._folder_ids.get(folder)
-        if fid is not None:
-            return fid
-        row = self.conn.execute(
-            "SELECT id FROM folders WHERE path = ?", (folder,)).fetchone()
-        if row is None:
-            if not create:
-                return None
-            cur = self.conn.execute(
-                "INSERT INTO folders (path) VALUES (?)", (folder,))
-            fid = cur.lastrowid
-        else:
-            fid = row[0]
-        self._folder_ids[folder] = fid
-        return fid
-
-    def get_folder(self, folder: str) -> Dict[str, Dict[str, Any]]:
-        """Return {name: {'size', 'mtime_ns', 'algo', 'hash'}} for a folder."""
-        fid = self._folder_id(folder)
-        if fid is None:
-            return {}
-        rows = self.conn.execute(
-            "SELECT name, size, mtime_ns, algo, hash FROM file_state WHERE folder_id = ?",
-            (fid,))
-        return {name: {'size': size, 'mtime_ns': mtime_ns, 'algo': algo, 'hash': hash_}
-                for name, size, mtime_ns, algo, hash_ in rows}
-
-    def replace_folder(self, folder: str, entries: Dict[str, Dict[str, Any]]):
-        """Replace all rows for a folder with `entries`. Commits are batched
-        (COMMIT_EVERY folders) -- call close() or flush() to persist the tail."""
-        now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-        fid = self._folder_id(folder, create=True)
-        self.conn.execute("DELETE FROM file_state WHERE folder_id = ?", (fid,))
-        self.conn.executemany(
-            "INSERT INTO file_state (folder_id, name, size, mtime_ns, algo, hash, scanned_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [(fid, name, e['size'], e['mtime_ns'], e['algo'], e['hash'], now)
-             for name, e in entries.items()])
-        self._pending += 1
-        if (self._pending >= self.COMMIT_EVERY
-                or time.monotonic() - self._last_commit >= self.COMMIT_INTERVAL_S):
-            self.flush()
-
-    def flush(self):
-        """Commit any batched writes."""
-        if self.conn.in_transaction:
-            self.conn.commit()
-        self._pending = 0
-        self._last_commit = time.monotonic()
-
-    def close(self):
-        try:
-            self.flush()
-            self.conn.close()
-        except Exception:
-            pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-        return False
-
-
-# ==========================================================================
-# ---- src/dazzlesum/manifest.py -------------------------------------
-#      (monolith 3511c56 lines 725-952, 955-1190, 2058-2086, 2089-2104)
-# ==========================================================================
 class ShasumManager:
     """Manages .shasum files with backup, remove, restore, and list operations."""
 
@@ -2224,7 +729,7 @@ class ShasumManager:
         self.root_dir = Path(root_dir)
         self.backup_dir = Path(backup_dir) if backup_dir else None
         self.dry_run = dry_run
-        self.logger = state.dazzle_logger if state.dazzle_logger else logger
+        self.logger = dazzle_logger if dazzle_logger else logger
 
     def find_shasum_files(self) -> List[Path]:
         """Find all .shasum files in the directory tree."""
@@ -2527,17 +1032,16 @@ class MonolithicWriter:
 
         try:
             for filename, checksum_info in sorted(checksums.items()):
-                # Calculate relative path from root: filekit's
-                # compute_relative_path is exactly the relpath-with-
-                # absolute-fallback-on-cross-drive contract this inlined.
+                # Calculate relative path from root
                 file_path = directory / filename
-                relative_path = compute_relative_path(file_path, self.root_path)
-                if os.path.isabs(relative_path):
-                    # Cross-drive (Windows): fell back to the absolute path
-                    logger.warning(f"Could not create relative path for {file_path}, using absolute path")
-                else:
+                try:
+                    relative_path = os.path.relpath(file_path, self.root_path)
                     # Use forward slashes for cross-platform compatibility
                     relative_path = relative_path.replace('\\', '/')
+                except ValueError:
+                    # Handle cases where paths are on different drives (Windows)
+                    relative_path = str(file_path)
+                    logger.warning(f"Could not create relative path for {file_path}, using absolute path")
 
                 # Write in standard format: hash  filename
                 self.file_handle.write(f"{checksum_info['hash']}  {relative_path}\n")
@@ -2686,6 +1190,871 @@ class MonolithicWriter:
         return f"{bytes_count:.1f} TB"
 
 
+class ProgressTracker:
+    """Track progress with percentage completion and ETA."""
+
+    def __init__(self, total_dirs=0, total_files=0, show_progress=True):
+        self.total_dirs = total_dirs
+        self.total_files = total_files
+        self.processed_dirs = 0
+        self.processed_files = 0
+        self.processed_bytes = 0
+        self.show_progress = show_progress
+        self.start_time = time.time()
+        self.last_update = 0
+        self.update_interval = 0.5  # Update every 500ms
+
+    def update_dirs(self, count=1):
+        """Update directory progress."""
+        self.processed_dirs += count
+        self._maybe_display_progress()
+
+    def update_files(self, count=1, file_size=0):
+        """Update file progress."""
+        self.processed_files += count
+        self.processed_bytes += file_size
+        self._maybe_display_progress()
+
+    def _maybe_display_progress(self):
+        """Display progress if enough time has passed."""
+        if not self.show_progress:
+            return
+
+        now = time.time()
+        if now - self.last_update >= self.update_interval:
+            self.last_update = now
+            self._display_progress()
+
+    def _display_progress(self):
+        """Display current progress."""
+        if self.total_dirs == 0 and self.total_files == 0:
+            return
+
+        # Calculate overall progress
+        dir_weight = 0.1  # Directories are 10% of the work
+        file_weight = 0.9  # Files are 90% of the work
+
+        if self.total_dirs > 0 and self.total_files > 0:
+            dir_progress = (self.processed_dirs / self.total_dirs) * dir_weight
+            file_progress = (self.processed_files / self.total_files) * file_weight
+            overall_progress = dir_progress + file_progress
+        elif self.total_dirs > 0:
+            overall_progress = self.processed_dirs / self.total_dirs
+        else:
+            overall_progress = self.processed_files / self.total_files if self.total_files > 0 else 0
+
+        percentage = min(100, overall_progress * 100)
+
+        # Calculate ETA
+        elapsed = time.time() - self.start_time
+        if percentage > 0 and elapsed > 0:
+            eta_seconds = (elapsed / (percentage / 100)) - elapsed
+            eta_str = self._format_duration(eta_seconds) if eta_seconds > 0 else "calculating..."
+        else:
+            eta_str = "calculating..."
+
+        # Create progress bar
+        bar_width = 30
+        filled = int(bar_width * (percentage / 100))
+        bar = '#' * filled + '-' * (bar_width - filled)
+
+        # Format data throughput
+        data_str = self._format_bytes(self.processed_bytes)
+        if elapsed > 0 and self.processed_bytes > 0:
+            mbps = (self.processed_bytes / (1024 * 1024)) / elapsed
+            throughput_str = f"{mbps:.1f} MB/s"
+        else:
+            throughput_str = "-- MB/s"
+
+        # Print progress (overwrite previous line)
+        print(f"\r[{bar}] {percentage:5.1f}% | "
+              f"Dirs: {self.processed_dirs}/{self.total_dirs} | "
+              f"Files: {self.processed_files}/{self.total_files} | "
+              f"{data_str} ({throughput_str}) | "
+              f"ETA: {eta_str}", end='', flush=True)
+
+    @staticmethod
+    def _format_bytes(num_bytes):
+        """Format bytes in human-readable format."""
+        for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
+            if abs(num_bytes) < 1024.0:
+                return f"{num_bytes:.1f} {unit}"
+            num_bytes /= 1024.0
+        return f"{num_bytes:.1f} PB"
+
+    def _format_duration(self, seconds):
+        """Format duration in human-readable format."""
+        if seconds < 60:
+            return f"{seconds:.0f}s"
+        elif seconds < 3600:
+            return f"{seconds/60:.0f}m {seconds % 60:.0f}s"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            return f"{hours}h {minutes}m"
+
+    def finish(self):
+        """Complete the progress display."""
+        if self.show_progress and (self.total_dirs > 0 or self.total_files > 0):
+            # Force final 100% display
+            self.processed_dirs = self.total_dirs
+            self.processed_files = self.total_files
+            self._display_progress()
+            
+            print()  # New line after progress bar
+            elapsed = time.time() - self.start_time
+            logger.info(f"Completed {self.processed_dirs} directories, {self.processed_files} files in {self._format_duration(elapsed)}")
+
+
+class SummaryCollector:
+    """Collect summary statistics during processing."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Reset all counters."""
+        self.dirs_processed = 0
+        self.files_processed = 0
+        self.files_skipped = 0
+        self.files_failed = 0
+        self.total_bytes = 0
+        self.verification_results = {
+            'verified': 0,
+            'failed': 0,
+            'missing': 0,
+            'extra': 0
+        }
+
+    def add_directory(self, file_count, skip_count, fail_count, total_bytes):
+        """Add statistics from a directory."""
+        self.dirs_processed += 1
+        self.files_processed += file_count
+        self.files_skipped += skip_count
+        self.files_failed += fail_count
+        self.total_bytes += total_bytes
+
+    def add_verification(self, results):
+        """Add verification results."""
+        if 'error' not in results:
+            self.verification_results['verified'] += len(results.get('verified', []))
+            self.verification_results['failed'] += len(results.get('failed', []))
+            self.verification_results['missing'] += len(results.get('missing', []))
+            self.verification_results['extra'] += len(results.get('extra', []))
+
+    def get_summary(self):
+        """Get summary statistics."""
+        return {
+            'directories': self.dirs_processed,
+            'files_processed': self.files_processed,
+            'files_skipped': self.files_skipped,
+            'files_failed': self.files_failed,
+            'total_bytes': self.total_bytes,
+            'verification': self.verification_results
+        }
+
+    def print_summary(self):
+        """Print a summary of operations."""
+        summary = self.get_summary()
+
+        print("\n" + "="*60)
+        print("OPERATION SUMMARY")
+        print("="*60)
+        print(f"Directories processed: {summary['directories']}")
+        print(f"Files processed:       {summary['files_processed']}")
+        if summary['files_skipped'] > 0:
+            print(f"Files skipped:         {summary['files_skipped']}")
+        if summary['files_failed'] > 0:
+            print(f"Files failed:          {summary['files_failed']}")
+        print(f"Total data processed:  {self._format_bytes(summary['total_bytes'])}")
+
+        # Verification summary
+        if any(summary['verification'].values()):
+            print(f"\nVerification results:")
+            print(f"  Verified:  {summary['verification']['verified']}")
+            print(f"  Failed:    {summary['verification']['failed']}")
+            print(f"  Missing:   {summary['verification']['missing']}")
+            print(f"  Extra:     {summary['verification']['extra']}")
+
+        print("="*60)
+
+    def _format_bytes(self, bytes_count):
+        """Format bytes in human-readable format."""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if bytes_count < 1024:
+                return f"{bytes_count:.1f} {unit}"
+            bytes_count /= 1024
+        return f"{bytes_count:.1f} PB"
+
+
+def count_dirs_and_files(root_path: Path, include_patterns, exclude_patterns,
+                        follow_symlinks=False, recursive=True) -> Tuple[int, int]:
+    """Pre-walk directory tree to count directories and files.
+    
+    Args:
+        root_path: Root directory to count from
+        include_patterns: Patterns for files to include
+        exclude_patterns: Patterns for files to exclude  
+        follow_symlinks: Whether to follow symbolic links
+        recursive: Whether to count subdirectories recursively
+        
+    Returns:
+        Tuple of (directory_count, file_count)
+    """
+    symlink_handler = SymlinkHandler()
+    total_dirs = 0
+    total_files = 0
+
+    # Use a simple queue for counting
+    dirs_to_visit = deque([root_path])
+
+    while dirs_to_visit:
+        current_dir = dirs_to_visit.popleft()
+
+        # Skip if already visited (loop detection)
+        if symlink_handler.is_visited(current_dir):
+            continue
+        symlink_handler.mark_visited(current_dir)
+
+        # Skip if we shouldn't follow this link
+        if not symlink_handler.should_follow_link(current_dir, follow_symlinks):
+            continue
+
+        try:
+            total_dirs += 1
+
+            # Periodic progress during counting (every 500 dirs)
+            if total_dirs % 500 == 0:
+                print(f"\r  Counting... {total_dirs:,} dirs, {total_files:,} files", end="", flush=True)
+
+            # Count files in this directory
+            for item in current_dir.iterdir():
+                if item.is_file():
+                    # Apply same filtering logic as main processor
+                    if _should_include_file_simple(item, include_patterns, exclude_patterns):
+                        total_files += 1
+                elif item.is_dir() and not symlink_handler.is_visited(item):
+                    if recursive:
+                        # Skip excluded directories (same patterns used for files)
+                        dir_name = item.name
+                        skip = False
+                        for pattern in exclude_patterns:
+                            if dir_name == pattern or item.match(pattern):
+                                skip = True
+                                break
+                        if not skip:
+                            dirs_to_visit.append(item)
+        except Exception:
+            # Skip directories we can't access
+            continue
+
+    # Clear the counting line if we printed any updates
+    if total_dirs >= 100:
+        print("\r" + " " * 60 + "\r", end="", flush=True)
+
+    return total_dirs, total_files
+
+
+class CompiledPatternMatcher:
+    """String-level fast path for include/exclude pattern matching.
+
+    Path.match() in the per-file hot loop costs a Path allocation plus a
+    per-pattern parse for every file (3.37M files x 8 patterns on the
+    reference library). This compiles all BASENAME patterns (no '/') into one
+    alternation regex matched against the entry name string; multi-component
+    patterns (e.g. "Vault/Restricted/00 NO SCAN") are rare, sit outside
+    the per-file hot path, and keep exact Path.match semantics via fallback.
+
+    Case behavior mirrors pathlib: case-insensitive on Windows (Path.match
+    uses normcase), case-sensitive elsewhere. Equivalence with the legacy
+    per-pattern Path.match loop is pinned by tests.
+    """
+
+    def __init__(self, patterns):
+        import fnmatch as _fnmatch
+        self.patterns = list(patterns or [])
+        self.multi = [p for p in self.patterns if '/' in p.replace('\\', '/')]
+        basename = [p for p in self.patterns if p not in self.multi]
+        if basename:
+            joined = '|'.join(f'(?:{_fnmatch.translate(p)})' for p in basename)
+            flags = re.IGNORECASE if os.name == 'nt' else 0
+            self._name_re = re.compile(joined, flags)
+        else:
+            self._name_re = None
+
+    def matches_name(self, name: str) -> bool:
+        """True if the basename matches any basename pattern."""
+        return bool(self._name_re and self._name_re.match(name))
+
+    def matches_path(self, path: Path) -> bool:
+        """Full check: basename regex first, then multi-component fallback."""
+        if self._name_re and self._name_re.match(path.name):
+            return True
+        for pattern in self.multi:
+            if path.match(pattern):
+                return True
+        return False
+
+    def matches_multi(self, path: Path) -> bool:
+        """Check only the multi-component patterns (exact Path.match semantics)."""
+        for pattern in self.multi:
+            if path.match(pattern):
+                return True
+        return False
+
+
+def _always_excluded_name(filename: str) -> bool:
+    """Tool-owned files that must never be checksummed (string-only check)."""
+    return (filename in (SHASUM_FILENAME, STATE_FILENAME, SHASUM_FILENAME + '.tmp')
+            or filename.startswith(CACHE_FILENAME))
+
+
+def _should_include_file_simple(file_path: Path, include_patterns, exclude_patterns) -> bool:
+    """Simplified version of file inclusion check for counting."""
+    filename = file_path.name
+
+    # Always exclude our own files (CACHE_FILENAME prefix also covers
+    # SQLite sidecars like .dazzle-cache.sqlite-journal)
+    if _always_excluded_name(filename):
+        return False
+
+    # Apply exclude patterns
+    for pattern in exclude_patterns:
+        if file_path.match(pattern):
+            return False
+
+    # Apply include patterns (if any)
+    if include_patterns:
+        for pattern in include_patterns:
+            if file_path.match(pattern):
+                return True
+        return False
+
+    return True
+
+
+class LineEndingHandler:
+    """Handles line ending normalization for consistent checksums across platforms."""
+
+    def __init__(self, strategy='auto'):
+        """
+        Initialize line ending handler.
+
+        Args:
+            strategy: 'auto', 'unix', 'windows', 'preserve'
+        """
+        self.strategy = strategy
+        self.text_extensions = {
+            '.txt', '.py', '.js', '.html', '.css', '.xml', '.json', '.yaml', '.yml',
+            '.md', '.rst', '.cfg', '.ini', '.conf', '.log', '.sql', '.sh', '.bat',
+            '.cmd', '.ps1', '.php', '.rb', '.pl', '.java', '.c', '.cpp', '.h',
+            '.hpp', '.cs', '.vb', '.go', '.rs', '.swift', '.kt', '.scala'
+        }
+
+    def should_normalize(self, file_path: Path) -> bool:
+        """Determine if a file should have line ending normalization."""
+        if self.strategy == 'preserve':
+            return False
+
+        # Check file extension
+        if file_path.suffix.lower() in self.text_extensions:
+            return True
+
+        # Auto-detect by reading first few bytes
+        try:
+            with open(file_path, 'rb') as f:
+                sample = f.read(1024)
+                if not sample:
+                    return False
+
+                # Check for null bytes (indicates binary)
+                if b'\x00' in sample:
+                    return False
+
+                # Check for text-like content
+                try:
+                    sample.decode('utf-8')
+                    return True
+                except UnicodeDecodeError:
+                    try:
+                        sample.decode('latin-1')
+                        return True
+                    except UnicodeDecodeError:
+                        return False
+        except Exception:
+            return False
+
+    def normalize_content(self, content: bytes) -> bytes:
+        """Normalize line endings in content."""
+        if self.strategy == 'preserve':
+            return content
+
+        try:
+            # Decode to string
+            text = content.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                text = content.decode('latin-1')
+            except UnicodeDecodeError:
+                return content  # Can't decode, return as-is
+
+        # Normalize line endings
+        if self.strategy == 'unix' or self.strategy == 'auto':
+            text = text.replace('\r\n', '\n').replace('\r', '\n')
+        elif self.strategy == 'windows':
+            text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
+
+        return text.encode('utf-8')
+
+
+class SymlinkHandler:
+    """Handles symlink and junction detection with loop prevention."""
+
+    def __init__(self):
+        self.visited_inodes = set()
+        self.visited_paths = set()
+
+    def is_symlink_or_junction(self, path: Path) -> Tuple[bool, Optional[str]]:
+        """Detect symlinks and Windows junctions."""
+        try:
+            # Standard symlink detection
+            if path.is_symlink():
+                return True, 'symlink'
+
+            # Windows junction detection
+            if is_windows() and path.is_dir() and self._is_junction(path):
+                return True, 'junction'
+
+        except Exception as e:
+            logger.debug(f"Error checking symlink status for {path}: {e}")
+
+        return False, None
+
+    def _is_junction(self, path: Path) -> bool:
+        """Detect Windows junctions via reparse-point attributes.
+
+        Pure lstat -- no subprocess, no resolve(). The previous implementation
+        shelled out to `dir /AL` for every NON-junction directory (~60ms each,
+        hours at library scale) and misclassified any directory reached
+        through a junction ancestor because resolve() != path for all of them.
+        """
+        try:
+            # Python 3.12+ has a dedicated check (reparse tag == mount point)
+            if hasattr(path, 'is_junction'):
+                return path.is_junction()
+
+            stat_info = os.lstat(str(path))
+            attrs = getattr(stat_info, 'st_file_attributes', 0)
+            reparse = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x0400)
+            # Symlinks were already handled by the caller; any remaining
+            # directory reparse point (junction, mount point) should not be
+            # traversed by default.
+            return bool(attrs & reparse)
+        except OSError as e:
+            logger.debug(f"Error detecting junction for {path}: {e}")
+            return False
+
+    def should_follow_link(self, path: Path, follow_symlinks: bool = False) -> bool:
+        """Determine if we should follow this link."""
+        is_link, link_type = self.is_symlink_or_junction(path)
+
+        if not is_link:
+            return True  # Regular file/directory
+
+        if not follow_symlinks:
+            return False  # User doesn't want to follow links
+
+        # Additional safety checks for links
+        try:
+            target = path.resolve()
+            # Ensure target exists and isn't pointing to parent
+            return target.exists() and not self._is_parent_loop(path, target)
+        except (OSError, RuntimeError):
+            return False  # Broken or dangerous link
+
+    def _is_parent_loop(self, link_path: Path, target_path: Path) -> bool:
+        """Check if target is a parent of the link (potential loop)."""
+        try:
+            link_path.relative_to(target_path)
+            return True  # link is inside target - potential loop
+        except ValueError:
+            return False  # No parent relationship
+
+    def check_and_mark_walk_path(self, path: Path) -> bool:
+        """Cheap duplicate guard for physical (non-link-following) walks.
+
+        Returns True if the path was already seen. Keys by the walk path
+        STRING only -- no resolve(), no stat(). When links are not followed,
+        a BFS over physical directories cannot revisit a directory except by
+        being enqueued twice with the same path, so inode tracking (which
+        cost 4 syscalls per directory AND caused real directories to be
+        skipped when a junction elsewhere in the tree pointed at them --
+        their inodes got marked through the junction) is wrong here. Inode
+        loop-protection belongs only to link-FOLLOWING walks.
+        """
+        key = str(path)
+        if key in self.visited_paths:
+            return True
+        self.visited_paths.add(key)
+        return False
+
+    def mark_visited(self, path: Path):
+        """Mark a path as visited for loop detection."""
+        # Mark by resolved path
+        try:
+            resolved_path = str(path.resolve())
+            self.visited_paths.add(resolved_path)
+        except Exception:
+            self.visited_paths.add(str(path))
+
+        # Mark by inode (if available)
+        try:
+            stat_info = path.stat()
+            inode_key = (stat_info.st_dev, stat_info.st_ino)
+            self.visited_inodes.add(inode_key)
+        except (OSError, AttributeError):
+            pass  # Can't get inode info, path marking is sufficient
+
+    def is_visited(self, path: Path) -> bool:
+        """Check if we've already visited this path/inode."""
+        # Check by resolved path
+        try:
+            resolved_path = str(path.resolve())
+            if resolved_path in self.visited_paths:
+                return True
+        except Exception:
+            if str(path) in self.visited_paths:
+                return True
+
+        # Check by inode (if available)
+        try:
+            stat_info = path.stat()
+            inode_key = (stat_info.st_dev, stat_info.st_ino)
+            if inode_key in self.visited_inodes:
+                return True
+        except (OSError, AttributeError):
+            pass
+
+        return False
+
+
+class FIFODirectoryWalker:
+    """FIFO directory processor for memory-efficient traversal."""
+
+    def __init__(self, follow_symlinks=False, exclude_patterns=None):
+        self.processing_queue = deque()
+        self.symlink_handler = SymlinkHandler()
+        self.follow_symlinks = follow_symlinks
+        self.exclude_patterns = exclude_patterns or []
+        self._exclude_matcher = CompiledPatternMatcher(self.exclude_patterns)
+        self.processed_count = 0
+
+    def _is_excluded_dir(self, item: Path) -> bool:
+        """Match a directory against exclude patterns (same Path.match
+        semantics as file exclusion). Historically --exclude only filtered
+        FILES by name -- traversal descended into .git, .private, etc. and
+        checksummed their contents, since files inside an excluded directory
+        don't themselves match the directory's pattern.
+
+        v1.5.0: basename patterns via one compiled regex on the dir NAME;
+        multi-component patterns keep exact Path.match semantics."""
+        m = self._exclude_matcher
+        if m.matches_name(item.name):
+            return True
+        if m.multi and m.matches_multi(item):
+            return True
+        return False
+
+    def walk_and_process(self, root_path: Path, processor_func, recursive=True):
+        """
+        FIFO directory processing with callback.
+
+        Args:
+            root_path: Starting directory
+            processor_func: Function to call for each directory
+            recursive: Whether to process subdirectories
+        """
+        self.processing_queue.append(root_path)
+
+        while self.processing_queue:
+            current_dir = self.processing_queue.popleft()
+
+            # Duplicate/loop guard. Physical walks (follow_symlinks=False)
+            # use the cheap string-key guard: inode marking followed links
+            # via stat() and caused real directories to be skipped whenever a
+            # junction elsewhere pointed at them (coverage hole, found
+            # 2026-07-17: an entire venv subtree invisible to every scan),
+            # and cost 4 syscalls per directory.
+            if self.follow_symlinks:
+                if self.symlink_handler.is_visited(current_dir):
+                    logger.warning(f"Skipping {current_dir} - already visited (loop detected)")
+                    continue
+                self.symlink_handler.mark_visited(current_dir)
+            elif self.symlink_handler.check_and_mark_walk_path(current_dir):
+                continue
+
+            # Check if we should follow this directory (symlink safety)
+            if not self.symlink_handler.should_follow_link(current_dir, self.follow_symlinks):
+                logger.debug(f"Skipping {current_dir} - symlink/junction not followed")
+                continue
+
+            # Process current directory
+            try:
+                if dazzle_logger:
+                    dazzle_logger.directory_start(current_dir)
+                else:
+                    logger.info(f"Processing directory: {current_dir}")
+                processor_func(current_dir)
+                self.processed_count += 1
+            except Exception as e:
+                logger.error(f"Error processing directory {current_dir}: {e}")
+                continue
+
+            # Add subdirectories to queue if recursive
+            if recursive:
+                try:
+                    subdirs = [item for item in current_dir.iterdir()
+                              if item.is_dir()
+                              and not self._is_excluded_dir(item)
+                              and not self.symlink_handler.is_visited(item)]
+                    for subdir in subdirs:
+                        self.processing_queue.append(subdir)
+                        logger.debug(f"Added to queue: {subdir}")
+                except Exception as e:
+                    logger.warning(f"Error listing subdirectories of {current_dir}: {e}")
+
+
+class DazzleHashCalculator:
+    """Main hash calculator with normalization and native tool integration."""
+
+    def __init__(self, algorithm=DEFAULT_ALGORITHM, line_ending_strategy='auto',
+                 chunk_size=DEFAULT_CHUNK_SIZE):
+        self.algorithm = algorithm.lower()
+        self.chunk_size = chunk_size
+        self.line_handler = LineEndingHandler(line_ending_strategy)
+        self.native_tool = self._detect_native_tool()
+
+    def _detect_native_tool(self) -> Optional[str]:
+        """Detect available native checksum tools."""
+        tools_to_try = []
+
+        if is_windows():
+            tools_to_try = ['fsum', 'certutil']
+        else:
+            if self.algorithm == 'sha256':
+                tools_to_try = ['sha256sum', 'shasum']
+            elif self.algorithm == 'sha1':
+                tools_to_try = ['sha1sum', 'shasum']
+            elif self.algorithm == 'md5':
+                tools_to_try = ['md5sum', 'md5']
+            elif self.algorithm == 'sha512':
+                tools_to_try = ['sha512sum', 'shasum']
+
+        for tool in tools_to_try:
+            if self._tool_available(tool):
+                if dazzle_logger:
+                    dazzle_logger.tool_selection(tool, self.algorithm)
+                else:
+                    logger.debug(f"Using native tool: {tool}")
+                return tool
+
+        if dazzle_logger:
+            dazzle_logger.tool_selection(None, self.algorithm)
+        else:
+            logger.debug("No native tools available, using Python implementation")
+        return None
+
+    def _tool_available(self, tool: str) -> bool:
+        """Check if a native tool is available."""
+        try:
+            # Special handling for fsum
+            if tool == 'fsum':
+                result = subprocess.run([tool], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
+                # fsum returns usage info when called without arguments
+                return 'SlavaSoft' in result.stdout or 'fsum' in result.stdout.lower()
+
+            # For other tools, try --help or --version
+            for flag in ['--help', '--version', '-h']:
+                try:
+                    result = subprocess.run([tool, flag], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
+                    if result.returncode == 0 or 'usage' in result.stderr.lower():
+                        return True
+                except Exception:
+                    continue
+
+            return False
+        except Exception:
+            return False
+
+    def _calculate_with_native_tool(self, file_path: Path) -> str:
+        """Calculate hash using native tool."""
+        if not self.native_tool:
+            raise ValueError("No native tool available")
+
+        # Handle different tools
+        if self.native_tool == 'fsum':
+            return self._calculate_with_fsum(file_path)
+        elif self.native_tool == 'certutil':
+            return self._calculate_with_certutil(file_path)
+        elif self.native_tool.endswith('sum'):
+            return self._calculate_with_hashsum(file_path)
+        elif self.native_tool == 'shasum':
+            return self._calculate_with_shasum(file_path)
+        else:
+            raise ValueError(f"Unsupported native tool: {self.native_tool}")
+
+    def calculate_file_hash(self, file_path: Path) -> str:
+        """Calculate hash for a single file."""
+        # Normalize path using unctools if available
+        if HAVE_UNCTOOLS:
+            file_path = normalize_path(file_path)
+
+        # Try native tool first
+        if self.native_tool:
+            try:
+                return self._calculate_with_native_tool(file_path)
+            except Exception as e:
+                # Only log warning in debug mode to reduce noise
+                logger.debug(f"Native tool {self.native_tool} failed for {file_path}, using Python: {e}")
+
+        # Fallback to Python implementation
+        return self._calculate_with_python(file_path)
+
+    def _calculate_with_fsum(self, file_path: Path) -> str:
+        """Calculate hash using Windows fsum tool."""
+        cmd = ['fsum', f'-{self.algorithm}', str(file_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
+
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
+
+        # Parse fsum output - skip header lines and comments
+        lines = result.stdout.splitlines()
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines, comment lines, and header lines
+            if not line or line.startswith(';') or line.startswith('SlavaSoft'):
+                continue
+
+            # Look for hash lines - they contain the filename with * prefix
+            if ' *' in line:
+                hash_value = line.split(' *')[0].strip()
+                return hash_value.lower()
+
+            # Alternative format: hash followed by space and filename
+            parts = line.split()
+            if len(parts) >= 2 and len(parts[0]) in [32, 40, 64, 128]:  # Common hash lengths
+                return parts[0].lower()
+
+        raise ValueError(f"Could not parse fsum output: {result.stdout}")
+
+    def _calculate_with_certutil(self, file_path: Path) -> str:
+        """Calculate hash using Windows certutil."""
+        algo_map = {'md5': 'MD5', 'sha1': 'SHA1', 'sha256': 'SHA256', 'sha512': 'SHA512'}
+        certutil_algo = algo_map.get(self.algorithm)
+
+        if not certutil_algo:
+            raise ValueError(f"Unsupported algorithm for certutil: {self.algorithm}")
+
+        cmd = ['certutil', '-hashfile', str(file_path), certutil_algo]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
+
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
+
+        # Parse certutil output - hash is typically on the second non-empty line
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        for line in lines[1:]:  # Skip first line (filename)
+            # Remove spaces and check if it looks like a hash
+            clean_line = line.replace(' ', '').replace('\t', '')
+            if len(clean_line) in [32, 40, 64, 128] and all(c in '0123456789abcdefABCDEF' for c in clean_line):
+                return clean_line.lower()
+
+        raise ValueError(f"Could not parse certutil output: {result.stdout}")
+
+    def _calculate_with_hashsum(self, file_path: Path) -> str:
+        """Calculate hash using Unix *sum tools."""
+        cmd = [self.native_tool, str(file_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
+
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
+
+        # Parse output (first field is hash)
+        first_line = result.stdout.strip().split('\n')[0]
+        hash_value = first_line.split()[0]
+        return hash_value.lower()
+
+    def _calculate_with_shasum(self, file_path: Path) -> str:
+        """Calculate hash using shasum tool."""
+        algo_map = {'sha1': '1', 'sha256': '256', 'sha512': '512'}
+        shasum_algo = algo_map.get(self.algorithm)
+
+        if not shasum_algo:
+            raise ValueError(f"Unsupported algorithm for shasum: {self.algorithm}")
+
+        cmd = ['shasum', f'-a{shasum_algo}', str(file_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
+
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, cmd, result.stderr)
+
+        # Parse output (first field is hash)
+        first_line = result.stdout.strip().split('\n')[0]
+        hash_value = first_line.split()[0]
+        return hash_value.lower()
+
+    def _calculate_with_python(self, file_path: Path) -> str:
+        """Calculate hash using Python hashlib."""
+        try:
+            hasher = hashlib.new(self.algorithm)
+        except ValueError:
+            raise ValueError(f"Unsupported hash algorithm: {self.algorithm}")
+
+        # Use safe_open if available
+        try:
+            if HAVE_UNCTOOLS:
+                with safe_open(file_path, 'rb') as f:
+                    return self._hash_file_content(f, hasher)
+            else:
+                with open(file_path, 'rb') as f:
+                    return self._hash_file_content(f, hasher)
+        except Exception as e:
+            logger.error(f"Error reading file {file_path}: {e}")
+            raise
+
+    def _hash_file_content(self, file_obj, hasher) -> str:
+        """Hash file content with optional normalization."""
+        # Check if we should normalize line endings
+        first_chunk = file_obj.read(self.chunk_size)
+        if not first_chunk:
+            return hasher.hexdigest()
+
+        # Reset file pointer
+        file_obj.seek(0)
+
+        # Determine if we should normalize
+        temp_path = Path(file_obj.name) if hasattr(file_obj, 'name') else None
+        should_normalize = (temp_path and
+                          self.line_handler.should_normalize(temp_path))
+
+        if should_normalize:
+            # Read entire file and normalize
+            content = file_obj.read()
+            normalized_content = self.line_handler.normalize_content(content)
+            hasher.update(normalized_content)
+        else:
+            # Stream processing for large files
+            file_obj.seek(0)
+            while True:
+                chunk = file_obj.read(self.chunk_size)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+
+        return hasher.hexdigest()
+
+
 def is_monolithic_file(file_path: Path) -> bool:
     """Detect if a checksum file is in monolithic format."""
     try:
@@ -2735,10 +2104,246 @@ def parse_shasum_file(shasum_path: Path) -> Dict[str, str]:
     return stored_checksums
 
 
-# ==========================================================================
-# ---- src/dazzlesum/engine.py ---------------------------------------
-#      (monolith 3511c56 lines 2347-3577)
-# ==========================================================================
+class ShadowPathResolver:
+    """Resolves paths between source directories and shadow directory structure.
+    
+    The shadow directory feature allows keeping source directories clean by storing
+    all .shasum files in a parallel shadow directory structure.
+    
+    Example:
+        source_root: /data/projects/myproject/
+        shadow_root: /checksums/myproject/
+        
+        Source file: /data/projects/myproject/subdir/file.txt
+        Shadow .shasum: /checksums/myproject/subdir/.shasum
+    """
+    
+    def __init__(self, source_root: Path, shadow_root: Path):
+        self.source_root = Path(source_root).resolve()
+        self.shadow_root = Path(shadow_root).resolve()
+        
+        # Ensure shadow root directory exists
+        self.shadow_root.mkdir(parents=True, exist_ok=True)
+    
+    def get_shadow_shasum_path(self, source_dir: Path) -> Path:
+        """Get the shadow .shasum file path for a source directory.
+
+        Args:
+            source_dir: Source directory that would contain .shasum file
+
+        Returns:
+            Path to .shasum file in shadow directory structure
+
+        v1.5.0: fast path avoids the per-call Path.resolve() (an expensive
+        _getfinalpathname syscall, profiled at ~12s per 20K dirs) -- walker
+        paths already descend from the resolved source root. The resolve()
+        fallback keeps external callers with unnormalized paths correct.
+        """
+        try:
+            rel_path = Path(source_dir).relative_to(self.source_root)
+        except ValueError:
+            source_dir = Path(source_dir).resolve()
+            try:
+                rel_path = source_dir.relative_to(self.source_root)
+            except ValueError:
+                raise ValueError(
+                    f"Source directory {source_dir} is not under source root {self.source_root}")
+
+        # Create corresponding shadow directory path
+        shadow_dir = self.shadow_root / rel_path
+        return shadow_dir / SHASUM_FILENAME
+    
+    def get_source_file_path(self, shadow_relative_path: str) -> Path:
+        """Resolve a shadow-relative file path to the corresponding source file.
+        
+        Args:
+            shadow_relative_path: Relative path as stored in shadow .shasum file
+            
+        Returns:
+            Path to actual source file
+        """
+        return self.source_root / shadow_relative_path
+    
+    def ensure_shadow_directory(self, shadow_shasum_path: Path) -> None:
+        """Ensure the directory for a shadow .shasum file exists.
+        
+        Args:
+            shadow_shasum_path: Path to shadow .shasum file
+        """
+        shadow_shasum_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    def get_shadow_monolithic_path(self, algorithm: str, output_filename: Optional[str] = None) -> Path:
+        """Get path for monolithic checksum file in shadow directory.
+        
+        Args:
+            algorithm: Hash algorithm for default filename
+            output_filename: Optional custom filename
+            
+        Returns:
+            Path to monolithic checksum file in shadow root
+        """
+        if output_filename:
+            return self.shadow_root / output_filename
+        return self.shadow_root / f"{MONOLITHIC_DEFAULT_NAME}.{algorithm}"
+
+
+class StateCache:
+    """Per-machine (size, mtime_ns) state cache backing incremental updates.
+
+    Lives in ONE SQLite file at the shadow root (or the scan root when no
+    shadow dir is used). It is a disposable accelerator, NOT part of the
+    checksum record: hashes in .shasum files remain the only durable truth.
+    Delete the file and `update --bootstrap=...` rebuilds it.
+
+    Never sync or commit this file. Stat state (mtime especially) is only
+    meaningful on the machine that recorded it -- synced copies of a library
+    (e.g. via Resilio) carry origin mtimes that would poison another peer's
+    cache into silently skipping changed files.
+
+    Folder keys are POSIX-style paths relative to the scan root, so the cache
+    stays valid when the same tree is reached via different mounts
+    (drive letter, subst, UNC).
+    """
+
+    # Schema v2: folder paths are interned into `folders` (an integer id)
+    # instead of being repeated in every file row. On a multi-million-file
+    # library this shrinks the cache ~35-40% and, more importantly, keeps the
+    # (folder_id, name) primary-key b-tree far smaller than text keys.
+    SCHEMA_VERSION = 2
+    SCHEMA = """
+        CREATE TABLE IF NOT EXISTS folders (
+            id   INTEGER PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS file_state (
+            folder_id  INTEGER NOT NULL REFERENCES folders(id),
+            name       TEXT NOT NULL,
+            size       INTEGER NOT NULL,
+            mtime_ns   INTEGER NOT NULL,
+            algo       TEXT NOT NULL,
+            hash       TEXT NOT NULL,
+            scanned_at TEXT NOT NULL,
+            PRIMARY KEY (folder_id, name)
+        );
+    """
+
+    # Commit every N replace_folder() calls instead of every call. Each
+    # commit is a journal fsync; per-folder commits cost hours at library
+    # scale (measured: ~12% CPU, 88% fsync-blocked). The cache is a
+    # disposable accelerator, so losing the tail of a batch in a crash just
+    # means those folders re-seed on the next run. COMMIT_INTERVAL_S bounds
+    # the loss window in TIME as well: without it, a hard kill on a tree
+    # smaller than COMMIT_EVERY dirs forfeited the entire run's cache
+    # (adversarial finding, 2026-07-17). Ctrl-C always flushes via close().
+    COMMIT_EVERY = 200
+    COMMIT_INTERVAL_S = 5.0
+
+    def __init__(self, cache_path: Path):
+        self.cache_path = Path(cache_path)
+        self.conn = sqlite3.connect(str(self.cache_path), timeout=30.0)
+        self.conn.execute("PRAGMA busy_timeout = 30000")
+        # Disposable cache: durability guarantees are wasted on it (delete
+        # and re-bootstrap is always safe), so skip the per-commit fsyncs
+        # and keep the rollback journal in memory.
+        self.conn.execute("PRAGMA synchronous = OFF")
+        self.conn.execute("PRAGMA journal_mode = MEMORY")
+        self._ensure_schema()
+        self._pending = 0
+        self._last_commit = time.monotonic()
+        self._folder_ids: Dict[str, int] = {}
+
+    def _ensure_schema(self):
+        """Create the v2 schema; drop and rebuild any older layout (the cache
+        is regenerable by design, so there is no migration path -- just a
+        rebuild)."""
+        version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if version != self.SCHEMA_VERSION:
+            self.conn.executescript(
+                "DROP TABLE IF EXISTS file_state; DROP TABLE IF EXISTS folders;")
+            self.conn.executescript(self.SCHEMA)
+            self.conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
+            self.conn.commit()
+
+    @staticmethod
+    def folder_key(directory: Path, root: Path) -> str:
+        """Stable per-tree key: POSIX relative path from scan root ('.' for root).
+
+        v1.5.0: pure string computation (os.path.relpath) -- the previous
+        Path.resolve().relative_to() cost TWO _getfinalpathname syscalls per
+        call (profiled at ~20s per 20K directories). Callers pass directories
+        descended from an already-resolved root (the walker guarantees this),
+        so no filesystem round-trip is needed.
+        """
+        rel = os.path.relpath(str(directory), str(root))
+        return '.' if rel == '.' else rel.replace('\\', '/')
+
+    def _folder_id(self, folder: str, create: bool = False) -> Optional[int]:
+        """Look up (optionally interning) the integer id for a folder path."""
+        fid = self._folder_ids.get(folder)
+        if fid is not None:
+            return fid
+        row = self.conn.execute(
+            "SELECT id FROM folders WHERE path = ?", (folder,)).fetchone()
+        if row is None:
+            if not create:
+                return None
+            cur = self.conn.execute(
+                "INSERT INTO folders (path) VALUES (?)", (folder,))
+            fid = cur.lastrowid
+        else:
+            fid = row[0]
+        self._folder_ids[folder] = fid
+        return fid
+
+    def get_folder(self, folder: str) -> Dict[str, Dict[str, Any]]:
+        """Return {name: {'size', 'mtime_ns', 'algo', 'hash'}} for a folder."""
+        fid = self._folder_id(folder)
+        if fid is None:
+            return {}
+        rows = self.conn.execute(
+            "SELECT name, size, mtime_ns, algo, hash FROM file_state WHERE folder_id = ?",
+            (fid,))
+        return {name: {'size': size, 'mtime_ns': mtime_ns, 'algo': algo, 'hash': hash_}
+                for name, size, mtime_ns, algo, hash_ in rows}
+
+    def replace_folder(self, folder: str, entries: Dict[str, Dict[str, Any]]):
+        """Replace all rows for a folder with `entries`. Commits are batched
+        (COMMIT_EVERY folders) -- call close() or flush() to persist the tail."""
+        now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        fid = self._folder_id(folder, create=True)
+        self.conn.execute("DELETE FROM file_state WHERE folder_id = ?", (fid,))
+        self.conn.executemany(
+            "INSERT INTO file_state (folder_id, name, size, mtime_ns, algo, hash, scanned_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(fid, name, e['size'], e['mtime_ns'], e['algo'], e['hash'], now)
+             for name, e in entries.items()])
+        self._pending += 1
+        if (self._pending >= self.COMMIT_EVERY
+                or time.monotonic() - self._last_commit >= self.COMMIT_INTERVAL_S):
+            self.flush()
+
+    def flush(self):
+        """Commit any batched writes."""
+        if self.conn.in_transaction:
+            self.conn.commit()
+        self._pending = 0
+        self._last_commit = time.monotonic()
+
+    def close(self):
+        try:
+            self.flush()
+            self.conn.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+
 class ChecksumGenerator:
     """Main checksum generator orchestrator."""
 
@@ -2918,8 +2523,8 @@ class ChecksumGenerator:
             files = [f for f in directory.iterdir() if f.is_file()]
 
             # Use DazzleLogger for consistent output
-            if state.dazzle_logger:
-                state.dazzle_logger.info(f"Found {len(files)} files in {directory}", level=1)
+            if dazzle_logger:
+                dazzle_logger.info(f"Found {len(files)} files in {directory}", level=1)
             else:
                 # Fallback for direct calls
                 if self.log_file:
@@ -2930,15 +2535,15 @@ class ChecksumGenerator:
             for file_path in files:
                 if not self.should_include_file(file_path):
                     files_skipped += 1
-                    if state.dazzle_logger:
-                        state.dazzle_logger.file_skipped(file_path)
+                    if dazzle_logger:
+                        dazzle_logger.file_skipped(file_path)
                     elif self.log_file:
                         logger.debug(f"Skipped: {file_path}")
                     continue
 
                 try:
-                    if state.dazzle_logger:
-                        state.dazzle_logger.file_processed(file_path)
+                    if dazzle_logger:
+                        dazzle_logger.file_processed(file_path)
                     elif self.log_file:
                         logger.debug(f"Processing file: {file_path}")
 
@@ -2980,8 +2585,8 @@ class ChecksumGenerator:
         elapsed_time = time.time() - start_time
 
         # Log results using DazzleLogger
-        if state.dazzle_logger:
-            state.dazzle_logger.directory_complete(directory, files_processed, files_skipped, files_failed, elapsed_time)
+        if dazzle_logger:
+            dazzle_logger.directory_complete(directory, files_processed, files_skipped, files_failed, elapsed_time)
         else:
             # Fallback for direct calls
             if self.log_file:
@@ -3007,14 +2612,20 @@ class ChecksumGenerator:
             shasum_path = directory / SHASUM_FILENAME
 
         try:
-            # Build the manifest text, then hand it to filekit's atomic writer
-            # (tmp sibling + os.replace -- same idiom this method previously
-            # inlined), so an interrupted run never leaves a truncated .shasum.
-            lines = [f"# Dazzle checksum tool v{__version__} - {self.algorithm} - {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"]
-            for filename, info in sorted(checksums.items()):
-                lines.append(f"{info['hash']}  {filename}\n")
-            lines.append("# End of checksums\n")
-            atomic_write_text(shasum_path, ''.join(lines))
+            # Write to a temp file then atomically replace, so an interrupted
+            # run never leaves a truncated .shasum behind.
+            temp_path = shasum_path.with_name(shasum_path.name + '.tmp')
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                # Write header comment
+                f.write(f"# Dazzle checksum tool v{__version__} - {self.algorithm} - {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
+
+                # Write checksums in standard format
+                for filename, info in sorted(checksums.items()):
+                    f.write(f"{info['hash']}  {filename}\n")
+
+                # Write end marker
+                f.write("# End of checksums\n")
+            os.replace(temp_path, shasum_path)
 
             if self.log_file:
                 logger.info(f"Wrote {len(checksums)} checksums to {shasum_path}")
@@ -3492,8 +3103,8 @@ class ChecksumGenerator:
         
         # Inform user if verifying against different directory than stored
         if file_root and str(Path(file_root).resolve()) != str(base_path.resolve()):
-            if state.dazzle_logger and not state.dazzle_logger.quiet:
-                state.dazzle_logger.info(f"Clone verification: Checking {base_path} against checksums from {file_root}", level=1)
+            if dazzle_logger and not dazzle_logger.quiet:
+                dazzle_logger.info(f"Clone verification: Checking {base_path} against checksums from {file_root}", level=1)
             else:
                 logger.info(f"Clone verification: Checking {base_path} against checksums from {file_root}")
 
@@ -3548,6 +3159,7 @@ class ChecksumGenerator:
     def process_directory_tree(self, root_directory: Path, recursive=True,
                              verify_only=False, update_mode=False):
         """Process an entire directory tree."""
+        global grand_totals
 
         if update_mode:
             # Incremental update path (see run_update). Historically this
@@ -3568,8 +3180,8 @@ class ChecksumGenerator:
                 source_root=root_directory,
                 shadow_root=self.shadow_dir
             )
-            if state.dazzle_logger:
-                state.dazzle_logger.info(f"Using shadow directory: {self.shadow_dir}", level=1)
+            if dazzle_logger:
+                dazzle_logger.info(f"Using shadow directory: {self.shadow_dir}", level=1)
             else:
                 logger.info(f"Using shadow directory: {self.shadow_dir}")
         
@@ -3632,8 +3244,8 @@ class ChecksumGenerator:
                     self.algorithm, 
                     self.output_file
                 )
-                if state.dazzle_logger:
-                    state.dazzle_logger.info(f"Using shadow directory for monolithic file: {output_path}", level=1)
+                if dazzle_logger:
+                    dazzle_logger.info(f"Using shadow directory for monolithic file: {output_path}", level=1)
                 else:
                     logger.info(f"Using shadow directory for monolithic file: {output_path}")
             elif self.output_file:
@@ -3652,8 +3264,8 @@ class ChecksumGenerator:
         def process_single_directory(directory: Path):
             # Skip directory if in resume mode and already processed
             if self._should_skip_directory(directory):
-                if state.dazzle_logger:
-                    state.dazzle_logger.info(f"Resume mode: Skipping already processed directory: {directory}", level=1)
+                if dazzle_logger:
+                    dazzle_logger.info(f"Resume mode: Skipping already processed directory: {directory}", level=1)
                 else:
                     logger.info(f"Resume mode: Skipping already processed directory: {directory}")
                 return
@@ -3685,8 +3297,8 @@ class ChecksumGenerator:
 
         # Initialize grand totals for recursive verification
         if verify_only and recursive:
-            state.grand_totals = GrandTotals()
-            state.grand_totals.start_timing()
+            grand_totals = GrandTotals()
+            grand_totals.start_timing()
 
         if not self.summary_mode:
             logger.info(f"Starting {'recursive ' if recursive else ''}processing of {root_directory}")
@@ -3715,14 +3327,14 @@ class ChecksumGenerator:
             logger.info(f"Completed processing {walker.processed_count} directories in {elapsed_time:.2f}s")
 
         # Display grand totals for recursive verification
-        if verify_only and recursive and state.grand_totals:
-            state.grand_totals.end_timing()
+        if verify_only and recursive and grand_totals:
+            grand_totals.end_timing()
             # Exit code must be finalized even when silent mode suppresses
             # the display -- silent mode is exit-codes-only, not exit-code-less
-            state.grand_totals.finalize_exit_code()
+            grand_totals.finalize_exit_code()
             # Check for silent mode (-6) - no output at all
-            if not (state.verbosity_config and state.verbosity_config.is_silent()):
-                state.grand_totals.display_grand_totals()
+            if not (verbosity_config and verbosity_config.is_silent()):
+                grand_totals.display_grand_totals()
 
         # Print summary if in summary mode
         if self.summary_mode:
@@ -3730,19 +3342,20 @@ class ChecksumGenerator:
 
     def _print_verification_results(self, path: Path, results: Dict[str, Any], show_all=False):  # noqa: C901
         """Print verification results for a directory or monolithic file."""
+        global squelch_settings, verbosity_config  # noqa: F824
         
         # Check for silent mode first - no output at all
-        if state.verbosity_config and state.verbosity_config.is_silent():
+        if verbosity_config and verbosity_config.is_silent():
             # Still add to grand totals if tracking, but no output
-            if state.grand_totals:
-                state.grand_totals.add_directory_result(results)
+            if grand_totals:
+                grand_totals.add_directory_result(results)
             return
         
         # Check for ultra-quiet modes - only grand totals and maybe summary
-        if state.verbosity_config and state.verbosity_config.get_effective_level() <= -5:
+        if verbosity_config and verbosity_config.get_effective_level() <= -5:
             # Still add to grand totals but skip all directory output
-            if state.grand_totals:
-                state.grand_totals.add_directory_result(results)
+            if grand_totals:
+                grand_totals.add_directory_result(results)
             return
         
         if 'error' in results:
@@ -3750,30 +3363,30 @@ class ChecksumGenerator:
             error_msg = results['error']
             if "No .shasum file found" in error_msg:
                 # Check squelch settings for NO_SHASUM messages
-                if state.squelch_settings and state.squelch_settings.get('NO_SHASUM', False):
+                if squelch_settings and squelch_settings.get('NO_SHASUM', False):
                     # Skip displaying this message due to squelch
                     pass
                 else:
                     # Use info_secondary color for missing .shasum files (not a failure, just informational)
-                    if state.color_formatter:
-                        colored_msg = state.color_formatter.info_secondary(f"{path}: {error_msg}")
+                    if color_formatter:
+                        colored_msg = color_formatter.info_secondary(f"{path}: {error_msg}")
                     else:
                         colored_msg = f"{path}: {error_msg}"
                     
-                    if state.dazzle_logger:
-                        state.dazzle_logger.info(colored_msg, level=0)
+                    if dazzle_logger:
+                        dazzle_logger.info(colored_msg, level=0)
                     else:
                         logger.info(colored_msg)
             else:
                 # Regular error - use error formatting
-                if state.dazzle_logger:
-                    state.dazzle_logger.error(f"{path}: {error_msg}")
+                if dazzle_logger:
+                    dazzle_logger.error(f"{path}: {error_msg}")
                 else:
                     logger.error(f"{path}: {error_msg}")
             
             # Add error results to grand totals if tracking
-            if state.grand_totals:
-                state.grand_totals.add_directory_result(results)
+            if grand_totals:
+                grand_totals.add_directory_result(results)
             return
 
         verified_count = len(results['verified'])
@@ -3782,66 +3395,66 @@ class ChecksumGenerator:
         extra_count = len(results['extra'])
 
         # Show individual file results if requested or verbose
-        if show_all or (state.dazzle_logger and state.dazzle_logger.verbosity >= 2):
+        if show_all or (dazzle_logger and dazzle_logger.verbosity >= 2):
             # Show all verification results
             for filename in results['verified']:
-                if state.color_formatter:
-                    logger.info(f" {state.color_formatter.success('OK')} {state.color_formatter.filename(filename)}")
+                if color_formatter:
+                    logger.info(f" {color_formatter.success('OK')} {color_formatter.filename(filename)}")
                 else:
                     logger.info(f" OK {filename}")
 
         # Show individual failure details - check squelch settings
-        if failed_count > 0 and not (state.squelch_settings and state.squelch_settings.get('FAILS', False)):
+        if failed_count > 0 and not (squelch_settings and squelch_settings.get('FAILS', False)):
             for item in results['failed']:
                 if isinstance(item, dict):
                     if 'error' in item:
-                        if state.color_formatter:
-                            error_text = f" {state.color_formatter.error('ERROR')} {state.color_formatter.filename(item['filename'])}: {item['error']}"
+                        if color_formatter:
+                            error_text = f" {color_formatter.error('ERROR')} {color_formatter.filename(item['filename'])}: {item['error']}"
                         else:
                             error_text = f" ERROR {item['filename']}: {item['error']}"
                         
-                        if state.dazzle_logger:
-                            state.dazzle_logger.error(error_text)
+                        if dazzle_logger:
+                            dazzle_logger.error(error_text)
                         else:
                             logger.error(error_text)
                     else:
                         # Always show hash mismatches with new format: expected HASH... got HASH... | filename
-                        if state.color_formatter:
-                            expected_hash = state.color_formatter.hash_value(f"expected {item['expected'][:16]}...")
-                            got_hash = state.color_formatter.hash_value(f"got {item['actual'][:16]}...")
-                            filename_part = state.color_formatter.filename(item['filename'])
-                            fail_text = f" {state.color_formatter.error('FAIL')} {expected_hash} {got_hash} | {filename_part}"
+                        if color_formatter:
+                            expected_hash = color_formatter.hash_value(f"expected {item['expected'][:16]}...")
+                            got_hash = color_formatter.hash_value(f"got {item['actual'][:16]}...")
+                            filename_part = color_formatter.filename(item['filename'])
+                            fail_text = f" {color_formatter.error('FAIL')} {expected_hash} {got_hash} | {filename_part}"
                         else:
                             fail_text = f" FAIL expected {item['expected'][:16]}... got {item['actual'][:16]}... | {item['filename']}"
                         
-                        if state.dazzle_logger:
+                        if dazzle_logger:
                             logger.error(fail_text)
                         else:
                             logger.error(fail_text)
 
         # Show individual missing files - check squelch settings
-        if missing_count > 0 and not (state.squelch_settings and state.squelch_settings.get('MISSING', False)):
+        if missing_count > 0 and not (squelch_settings and squelch_settings.get('MISSING', False)):
             for filename in results['missing']:
                 # Show missing files (problems)
-                if state.color_formatter:
-                    miss_text = f" {state.color_formatter.warning('MISS')} {state.color_formatter.filename(filename)}"
+                if color_formatter:
+                    miss_text = f" {color_formatter.warning('MISS')} {color_formatter.filename(filename)}"
                 else:
                     miss_text = f" MISS {filename}"
                 logger.warning(miss_text)
 
         # Show individual extra files - check squelch settings
-        if extra_count > 0 and not (state.squelch_settings and state.squelch_settings.get('EXTRA', False)):
+        if extra_count > 0 and not (squelch_settings and squelch_settings.get('EXTRA', False)):
             for filename in results['extra']:
                 # Show extra files
                 # In quiet mode, show directory context for EXTRA files
-                if state.dazzle_logger and state.dazzle_logger.quiet:
-                    if state.color_formatter:
-                        extra_text = f" {state.color_formatter.extra('EXTRA')} {state.color_formatter.filename(filename)} | {path}"
+                if dazzle_logger and dazzle_logger.quiet:
+                    if color_formatter:
+                        extra_text = f" {color_formatter.extra('EXTRA')} {color_formatter.filename(filename)} | {path}"
                     else:
                         extra_text = f" EXTRA {filename} | {path}"
                 else:
-                    if state.color_formatter:
-                        extra_text = f" {state.color_formatter.extra('EXTRA')} {state.color_formatter.filename(filename)}"
+                    if color_formatter:
+                        extra_text = f" {color_formatter.extra('EXTRA')} {color_formatter.filename(filename)}"
                     else:
                         extra_text = f" EXTRA {filename}"
                 logger.warning(extra_text)
@@ -3855,11 +3468,11 @@ class ChecksumGenerator:
         colored_status = format_status_with_colors(status_text, success_pct, failure_pct)
         
         # Format count details with colors and bold numbers
-        if state.color_formatter:
-            verified_text = f"{state.color_formatter.bold_number(verified_count)} {state.color_formatter.success('verified')}"
-            failed_text = f"{state.color_formatter.bold_number(failed_count)} {state.color_formatter.error('failed')}"
-            missing_text = f"{state.color_formatter.bold_number(missing_count)} {state.color_formatter.warning('missing')}"
-            extra_text = f"{state.color_formatter.bold_number(extra_count)} {state.color_formatter.extra('extra')}"
+        if color_formatter:
+            verified_text = f"{color_formatter.bold_number(verified_count)} {color_formatter.success('verified')}"
+            failed_text = f"{color_formatter.bold_number(failed_count)} {color_formatter.error('failed')}"
+            missing_text = f"{color_formatter.bold_number(missing_count)} {color_formatter.warning('missing')}"
+            extra_text = f"{color_formatter.bold_number(extra_count)} {color_formatter.extra('extra')}"
         else:
             verified_text = f"{verified_count} verified"
             failed_text = f"{failed_count} failed"
@@ -3872,40 +3485,40 @@ class ChecksumGenerator:
         # Check squelch settings before displaying
         should_display = True
         
-        if state.squelch_settings:
+        if squelch_settings:
             # Check if FORCE_SUMMARY is set - this overrides hiding logic but respects category filtering
-            if state.squelch_settings.get('FORCE_SUMMARY', False):
+            if squelch_settings.get('FORCE_SUMMARY', False):
                 # FORCE_SUMMARY overrides visibility hiding but respects category filtering
                 # Category filtering takes absolute priority - check independently
                 should_display = True  # Default to force display
                 
                 # Check SUCCESS squelching first (highest priority)
                 # SUCCESS includes both exit_code=0 (perfect) and exit_code=2 (with extras)
-                if 'SUCCESS' in status_text and state.squelch_settings.get('SUCCESS', False):
+                if 'SUCCESS' in status_text and squelch_settings.get('SUCCESS', False):
                     should_display = False  # SUCCESS always squelched when SUCCESS=True
                 
                 # Check pure EXTRA-only squelching (if not already squelched by SUCCESS)
-                if should_display and (extra_count > 0 and failed_count == 0 and missing_count == 0 and verified_count == 0 and state.squelch_settings.get('EXTRA', False)):
+                if should_display and (extra_count > 0 and failed_count == 0 and missing_count == 0 and verified_count == 0 and squelch_settings.get('EXTRA', False)):
                     should_display = False  # Pure EXTRA-only squelched when EXTRA=True
                 
                 # Check EXTRA_SUMMARY squelching (if not already squelched)
-                if should_display and (extra_count > 0 and failed_count == 0 and missing_count == 0 and state.squelch_settings.get('EXTRA_SUMMARY', False)):
+                if should_display and (extra_count > 0 and failed_count == 0 and missing_count == 0 and squelch_settings.get('EXTRA_SUMMARY', False)):
                     should_display = False  # EXTRA_SUMMARY compressed display
             # Check if SUMMARY (directory status lines) should be squelched
-            elif state.squelch_settings.get('SUMMARY', False):
+            elif squelch_settings.get('SUMMARY', False):
                 should_display = False
             # Check if this is a SUCCESS message that should be squelched
-            elif 'SUCCESS' in status_text and state.squelch_settings.get('SUCCESS', False):
+            elif 'SUCCESS' in status_text and squelch_settings.get('SUCCESS', False):
                 # This is a SUCCESS (perfect or with extras) and SUCCESS is squelched
                 # But for auto-detected commands, always show the summary
-                if not state.is_auto_detected_command:
+                if not is_auto_detected_command:
                     should_display = False
             else:
                 # Check if directory has only issues that are being squelched
                 # If all the issues in this directory are squelched, don't show status line
-                has_displayed_fails = failed_count > 0 and not state.squelch_settings.get('FAILS', False)
-                has_displayed_missing = missing_count > 0 and not state.squelch_settings.get('MISSING', False)
-                has_displayed_extra = extra_count > 0 and not state.squelch_settings.get('EXTRA', False)
+                has_displayed_fails = failed_count > 0 and not squelch_settings.get('FAILS', False)
+                has_displayed_missing = missing_count > 0 and not squelch_settings.get('MISSING', False)
+                has_displayed_extra = extra_count > 0 and not squelch_settings.get('EXTRA', False)
                 
                 # If directory has no displayed issues, don't show status line (unless show_all is True or auto-detected)
                 # For auto-detected commands, always show the summary even for pure SUCCESS
@@ -3913,60 +3526,57 @@ class ChecksumGenerator:
                 # issues are all squelched must hide too (e.g. extras-only dir
                 # with 0 verified at level -2), otherwise squelched levels
                 # paradoxically show MORE than less-squelched ones.
-                if not has_displayed_fails and not has_displayed_missing and not has_displayed_extra and not show_all and not state.is_auto_detected_command:
+                if not has_displayed_fails and not has_displayed_missing and not has_displayed_extra and not show_all and not is_auto_detected_command:
                     should_display = False
                 # Special case: if directory only has EXTRA files and EXTRA_SUMMARY is squelched, hide status line
                 elif (has_displayed_extra and not has_displayed_fails and not has_displayed_missing and 
-                      failed_count == 0 and missing_count == 0 and state.squelch_settings.get('EXTRA_SUMMARY', False)):
+                      failed_count == 0 and missing_count == 0 and squelch_settings.get('EXTRA_SUMMARY', False)):
                     should_display = False
         
         # Log with appropriate level based on severity
         if should_display:
             if exit_code <= 2:  # Perfect or almost perfect
-                if state.dazzle_logger:
-                    state.dazzle_logger.info(summary, level=0)
+                if dazzle_logger:
+                    dazzle_logger.info(summary, level=0)
                 else:
                     logger.info(summary)
             else:  # Has issues
-                if state.dazzle_logger:
-                    state.dazzle_logger.error(summary)
+                if dazzle_logger:
+                    dazzle_logger.error(summary)
                 else:
                     logger.error(summary)
         
         # Store exit code for main function to return
         # We'll add this to a global variable or pass it through the call stack
+        global verification_exit_code
         # Only set individual directory exit code if we're not tracking grand totals
         # If we have grand totals, they will set the final exit code
-        if not state.grand_totals:
-            state.verification_exit_code = exit_code
+        if not grand_totals:
+            verification_exit_code = exit_code
         
         # Add results to grand totals if tracking
-        if state.grand_totals:
-            state.grand_totals.add_directory_result(results)
+        if grand_totals:
+            grand_totals.add_directory_result(results)
         
         # In quiet mode, add spacing after directories that produce output
-        if state.dazzle_logger and state.dazzle_logger.quiet:
+        if dazzle_logger and dazzle_logger.quiet:
             # Check if this directory produced any output in quiet mode
             # Consider squelch settings when determining what constitutes "problems"
-            showed_fails = failed_count > 0 and not (state.squelch_settings and state.squelch_settings.get('FAILS', False))
-            showed_missing = missing_count > 0 and not (state.squelch_settings and state.squelch_settings.get('MISSING', False))
-            showed_extra = extra_count > 0 and not (state.squelch_settings and state.squelch_settings.get('EXTRA', False))
+            showed_fails = failed_count > 0 and not (squelch_settings and squelch_settings.get('FAILS', False))
+            showed_missing = missing_count > 0 and not (squelch_settings and squelch_settings.get('MISSING', False))
+            showed_extra = extra_count > 0 and not (squelch_settings and squelch_settings.get('EXTRA', False))
             has_problems = showed_fails or showed_missing or showed_extra
-            showed_summary = should_display and (exit_code > 2 or exit_code == 0 and not (state.squelch_settings and state.squelch_settings.get('SUCCESS', False)))
+            showed_summary = should_display and (exit_code > 2 or exit_code == 0 and not (squelch_settings and squelch_settings.get('SUCCESS', False)))
             
             if has_problems or showed_summary:
                 # This directory produced output, add spacing after it
                 print(file=sys.stderr)
         
         # Mark that we just processed a directory for spacing
-        if state.dazzle_logger:
-            state.dazzle_logger.last_was_directory = True
+        if dazzle_logger:
+            dazzle_logger.last_was_directory = True
 
 
-# ==========================================================================
-# ---- src/dazzlesum/cli.py ------------------------------------------
-#      (monolith 3511c56 lines 3580-4006, 4009-4066, 4069-4136, 4139-4173, 4175-4385, 4388-4398, 4400-4447, 4449-4511, 4513-4545, 4548-4559, 4561-4600, 4602-4658, 4660-4725, 4727-4765, 4808-4856, 4858-4865, 4954-5147)
-# ==========================================================================
 class DetailedHelpAction(argparse.Action):
     """Custom action to provide detailed help for specific topics."""
     
@@ -4562,7 +4172,6 @@ def create_parent_parser():
     
     return parent
 
-
 def create_argument_parser():
     """Create main parser with subcommands."""
     # Create parent parser with common arguments
@@ -4788,7 +4397,6 @@ def show_detailed_help(topic):
         print(f"Unknown help topic: {topic}")
         print("Available topics: mode, examples, shadow")
 
-
 def get_mode_help():
     """Get detailed help for --mode parameter."""
     return r"""--mode OPTION: Choose checksum generation strategy
@@ -4837,7 +4445,6 @@ EXAMPLES:
 REQUIREMENTS:
     - monolithic and both modes require --recursive flag
     - Use --output to specify custom monolithic filename"""
-
 
 def get_examples_help():
     """Get comprehensive usage examples."""
@@ -4903,7 +4510,6 @@ MIGRATION FROM OLD SYNTAX:
     OLD: dazzlesum -r --mode monolithic
     NEW: dazzlesum create -r --mode monolithic"""
 
-
 def get_shadow_help():
     """Get detailed help for shadow directories."""
     return r"""SHADOW DIRECTORIES: Keep Source Clean
@@ -4952,7 +4558,6 @@ def execute_main_action(args, action):
     else:  # create (default)
         return execute_create_action(args, directory)
 
-
 def execute_create_action(args, directory):
     """Execute create action."""
     # Determine generation modes based on --mode
@@ -4988,12 +4593,11 @@ def execute_create_action(args, directory):
         'monolithic': 'Single monolithic checksum file',
         'both': 'Both individual and monolithic files'
     }
-    state.dazzle_logger.info(f"Mode: {mode_descriptions[args.mode]}", level=1)
+    dazzle_logger.info(f"Mode: {mode_descriptions[args.mode]}", level=1)
     
     # Process directory tree
     generator.process_directory_tree(directory, recursive=args.recursive)
     return 0
-
 
 def execute_verify_action(args, directory):
     """Execute verify action."""
@@ -5004,8 +4608,8 @@ def execute_verify_action(args, directory):
         detected_file = auto_detect_checksum_file(directory)
         if detected_file and is_monolithic_file(detected_file):
             output_file = str(detected_file)
-            if state.dazzle_logger:
-                state.dazzle_logger.info(f"Auto-detected monolithic checksum file: {detected_file}", level=1)
+            if dazzle_logger:
+                dazzle_logger.info(f"Auto-detected monolithic checksum file: {detected_file}", level=1)
             else:
                 logger.info(f"Auto-detected monolithic checksum file: {detected_file}")
     
@@ -5033,25 +4637,25 @@ def execute_verify_action(args, directory):
     
     # Squelch settings are initialized by the verbosity system
     # Apply any explicit --squelch overrides on top of verbosity-based settings
+    global squelch_settings  # noqa: F824
     
     # If --show-all is used WITHOUT explicit --squelch, override SUCCESS squelching
     if getattr(args, 'show_all', False) and not (hasattr(args, 'squelch') and args.squelch):
-        if state.squelch_settings:
-            state.squelch_settings['SUCCESS'] = False  # Show SUCCESS messages with --show-all
+        if squelch_settings:
+            squelch_settings['SUCCESS'] = False  # Show SUCCESS messages with --show-all
     
     # Apply explicit --squelch overrides (these take precedence over --show-all)
-    if hasattr(args, 'squelch') and args.squelch and state.squelch_settings:
+    if hasattr(args, 'squelch') and args.squelch and squelch_settings:
         squelch_categories = [cat.strip().upper() for cat in args.squelch.split(',')]
         for category in squelch_categories:
             # Set unconditionally: requiring the key to pre-exist in the
             # level's default dict silently no-op'd any category absent from
             # that level's defaults (e.g. --squelch EXTRA_SUMMARY).
-            state.squelch_settings[category] = True
+            squelch_settings[category] = True
     
     # Process directory tree in verify mode
     generator.process_directory_tree(directory, recursive=args.recursive, verify_only=True)
     return 0
-
 
 def execute_update_action(args, directory):
     """Execute update action (incremental: rehash only changed files)."""
@@ -5120,7 +4724,6 @@ def execute_update_action(args, directory):
     )
     return 0 if totals and totals.get('failed', 0) == 0 else (1 if not totals else 2)
 
-
 def execute_manage_action(args, directory):
     """Execute manage action."""
     # For manage operations, we need to handle the operation from the parsed args
@@ -5160,6 +4763,46 @@ def execute_manage_action(args, directory):
         return 0
     
     return 1
+
+def setup_logging(verbosity=0, quiet=False, show_log_types=None):
+    """Configure logging based on verbosity settings."""
+    if quiet:
+        level = logging.WARNING
+    elif verbosity >= 3:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+
+    # Configure root logger
+    logging.getLogger().setLevel(level)
+
+    # Determine if we should show log type prefixes
+    # Priority: explicit parameter > environment variable > verbosity-based default
+    if show_log_types is not None:
+        use_log_types = show_log_types
+    elif os.environ.get('DAZZLESUM_SHOW_LOG_TYPES', '').lower() in ('1', 'true', 'yes'):
+        use_log_types = True
+    else:
+        # Clean output by default (verbosity 0), show log types for higher verbosity
+        use_log_types = verbosity >= 1
+
+    # Create formatter based on verbosity and log type preferences
+    if verbosity >= 3:
+        # Debug mode: full details including timestamps
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+        )
+    elif use_log_types:
+        # Normal mode with log type prefixes
+        formatter = logging.Formatter('%(levelname)s - %(message)s')
+    else:
+        # Clean mode: just the message
+        formatter = logging.Formatter('%(message)s')
+
+    # Update handler formatter
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(formatter)
+        handler.setLevel(level)
 
 
 def auto_detect_checksum_file(directory_path):
@@ -5212,7 +4855,6 @@ def auto_detect_checksum_file(directory_path):
         pass
     return None
 
-
 def detect_context_command(directory_path='.'):
     """Detect the appropriate command based on existing files in directory.
     
@@ -5223,8 +4865,95 @@ def detect_context_command(directory_path='.'):
     return 'verify' if detected_file else 'create'
 
 
+def calculate_verification_status(verified_count, failed_count, missing_count, extra_count):
+    """Calculate status label and exit code based on verification results.
+    
+    Args:
+        verified_count: Number of files that verified successfully
+        failed_count: Number of files that failed checksum verification
+        missing_count: Number of missing files
+        extra_count: Number of extra files found
+        
+    Returns:
+        tuple: (status_label, exit_code, success_percentage, failure_percentage)
+    """
+    total_expected = verified_count + failed_count + missing_count
+    
+    # Handle edge case where no files were expected
+    if total_expected == 0:
+        if extra_count > 0:
+            return "0%/100% UNEXPECTED FILES", 4, 0, 100
+        else:
+            return "100%/0% SUCCESS", 0, 100, 0
+    
+    # Calculate success/failure percentages
+    # Consider missing and failed files as failures
+    failure_count = failed_count + missing_count
+    success_percentage = round((verified_count / total_expected) * 100)
+    failure_percentage = round((failure_count / total_expected) * 100)
+    
+    # Determine status label and exit code based on success rate
+    if success_percentage == 100 and extra_count == 0:
+        status_label = "SUCCESS"
+        exit_code = 0
+    elif success_percentage == 100 and extra_count > 0:
+        status_label = "SUCCESS"  # All expected files verified, but has extras
+        exit_code = 2  # Not perfect due to extra files
+    elif success_percentage >= 99:
+        status_label = "ALMOST PERFECT"
+        exit_code = 2
+    elif success_percentage >= 95:
+        status_label = "SOME ISSUES"
+        exit_code = 3
+    elif success_percentage >= 80:
+        status_label = "FAILS"
+        exit_code = 4
+    elif success_percentage >= 50:
+        status_label = "MANY FAILS"
+        exit_code = 5
+    elif success_percentage > 0:
+        status_label = "MOSTLY FAILS"
+        exit_code = 6
+    else:
+        status_label = "FAILURE"
+        exit_code = 7
+    
+    return f"{success_percentage}%/{failure_percentage}% {status_label}", exit_code, success_percentage, failure_percentage
+
+
+def format_status_with_colors(status_text, success_percentage, failure_percentage):
+    """Apply colors to status text with green success % and red failure %.
+    
+    Args:
+        status_text: Full status text like "99%/1% ALMOST PERFECT"
+        success_percentage: Success percentage (0-100)
+        failure_percentage: Failure percentage (0-100)
+        
+    Returns:
+        Colored status text if colors enabled, otherwise plain text
+    """
+    if not color_formatter or not color_formatter.use_colors:
+        return status_text
+    
+    # Split the status text to colorize percentages
+    parts = status_text.split('%')
+    if len(parts) >= 3:
+        # Format: "99%/1% STATUS"
+        success_part = f"{parts[0]}%"
+        failure_part = f"{parts[1].split('/')[1]}%"
+        status_label = parts[2]
+        
+        colored_success = color_formatter.success(success_part)
+        colored_failure = color_formatter.error(failure_part)
+        
+        return f"{colored_success}/{colored_failure}{status_label}"
+    
+    # Fallback to original text if parsing fails
+    return status_text
+
 def main():
     """Main entry point with subcommand handling and context detection."""
+    global is_auto_detected_command
     try:
         parser = create_argument_parser()
         
@@ -5246,13 +4975,13 @@ def main():
                 detected_command = detect_context_command(first_arg)
                 sys.argv.insert(1, detected_command)
                 logger.info(f"Context-aware: executing '{detected_command} {first_arg}'")
-                state.is_auto_detected_command = True
+                is_auto_detected_command = True
         elif len(sys.argv) == 1:
             # No arguments at all, detect command for current directory
             detected_command = detect_context_command('.')
             sys.argv.extend([detected_command, '.'])
             logger.info(f"Context-aware: executing '{detected_command} .'")
-            state.is_auto_detected_command = True
+            is_auto_detected_command = True
             if detected_command == 'verify':
                 # Smart default: only show all verifications for small datasets
                 # For large monolithic files, use compact format
@@ -5283,11 +5012,12 @@ def main():
         args = parser.parse_args()
         
         # Handle verbosity configuration early
-        state.verbosity_config = VerbosityConfig.from_environment()
-        state.verbosity_config = VerbosityConfig.from_args(args)
+        global verbosity_config
+        verbosity_config = VerbosityConfig.from_environment()
+        verbosity_config = VerbosityConfig.from_args(args)
         
         # Initialize squelch settings from verbosity
-        initialize_squelch_from_verbosity(state.verbosity_config.get_effective_level())
+        initialize_squelch_from_verbosity(verbosity_config.get_effective_level())
         
         # Check if we have a command
         if not hasattr(args, 'command') or args.command is None:
@@ -5360,40 +5090,42 @@ def main():
         show_log_types = getattr(args, 'show_log_types', False) if hasattr(args, 'show_log_types') and args.show_log_types else None
         
         # Use verbosity config for logging setup
-        effective_quiet = state.verbosity_config.get_effective_level() < 0 or (args.command == 'create' and args.summary)
+        effective_quiet = verbosity_config.get_effective_level() < 0 or (args.command == 'create' and args.summary)
         setup_logging(args.verbose, effective_quiet, show_log_types)
         
-        state.dazzle_logger = DazzleLogger(
+        global dazzle_logger, color_formatter
+        dazzle_logger = DazzleLogger(
             verbosity=args.verbose,
             quiet=effective_quiet,
             summary_mode=(args.command == 'create' and args.summary),
-            show_log_types=state.verbosity_config.should_show_log_types() if show_log_types is None else show_log_types
+            show_log_types=verbosity_config.should_show_log_types() if show_log_types is None else show_log_types
         )
         
         # Set verbosity config in logger
-        state.dazzle_logger.set_verbosity_config(state.verbosity_config)
+        dazzle_logger.set_verbosity_config(verbosity_config)
         
         # Initialize color formatter
         use_colors = None if not getattr(args, 'no_color', False) else False
-        state.color_formatter = ColorFormatter(use_colors=use_colors)
+        color_formatter = ColorFormatter(use_colors=use_colors)
         
         # Log startup info (skip in silent mode)
-        if not (state.verbosity_config and state.verbosity_config.is_silent()):
-            state.dazzle_logger.info(f"Dazzle Checksum Tool v{__version__}", level=0)
+        if not (verbosity_config and verbosity_config.is_silent()):
+            dazzle_logger.info(f"Dazzle Checksum Tool v{__version__}", level=0)
         
         if args.verbose >= 3:
-            state.dazzle_logger.debug(f"Platform: {platform.platform()}")
-            state.dazzle_logger.debug(f"Python: {platform.python_version()}")
-            state.dazzle_logger.debug(f"UNCtools available: {HAVE_UNCTOOLS}")
-            state.dazzle_logger.debug(f"is_windows(): {is_windows()}")
+            dazzle_logger.debug(f"Platform: {platform.platform()}")
+            dazzle_logger.debug(f"Python: {platform.python_version()}")
+            dazzle_logger.debug(f"UNCtools available: {HAVE_UNCTOOLS}")
+            dazzle_logger.debug(f"is_windows(): {is_windows()}")
         
         # Execute the appropriate action based on command
-        state.verification_exit_code = 0  # Reset for each run
+        global verification_exit_code
+        verification_exit_code = 0  # Reset for each run
         result = execute_main_action(args, args.command)
         
         # For verification commands, return the calculated exit code
-        if args.command == 'verify' and state.verification_exit_code > 0:
-            return state.verification_exit_code
+        if args.command == 'verify' and verification_exit_code > 0:
+            return verification_exit_code
         
         return result
         

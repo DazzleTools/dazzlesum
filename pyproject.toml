@@ -32,6 +32,13 @@ classifiers = [
 # 3.9 floor aligns with the DazzleLib stack (dazzle-lib/filekit/linklib/
 # preservelib/tree-lib all require >=3.9) for the src/ refactor
 requires-python = ">=3.9"
+# DazzleLib stack -- Phase 2 lib integration (hard dependencies since
+# v1.5.0-alpha.4). The stitched single-file artifact stays self-contained:
+# scripts/build_monolith.py inlines the used lib objects at build time.
+dependencies = [
+    "dazzle-lib>=0.6.7",
+    "dazzle-filekit>=0.3.2",
+]
 
 [project.urls]
 Homepage = "https://github.com/DazzleTools/dazzlesum"
@@ -55,13 +62,19 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["dazzlesum"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.repokit-common]
 # Consumed by scripts/repokit-common/sync-versions.py (git-repokit-common subtree)
-version-source = "dazzlesum.py"
+version-source = "src/dazzlesum/_version.py"
 changelog-file = "CHANGELOG.md"
 repo-url = "https://github.com/DazzleTools/dazzlesum"
 
 [tool.setuptools.dynamic]
-version = {attr = "dazzlesum.get_package_version"}
+# Point at the stdlib-only _version submodule, NOT the package: reading the
+# attr off "dazzlesum" imports the whole package in the isolated build env,
+# which lacks the dazzle-filekit/dazzle-lib runtime deps (Phase 2 hard deps).
+version = {attr = "dazzlesum._version.get_package_version"}

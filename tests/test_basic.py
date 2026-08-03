@@ -35,6 +35,71 @@ class TestBasicFunctionality(unittest.TestCase):
         self.assertTrue(hasattr(dazzlesum, 'main'))
         self.assertTrue(hasattr(dazzlesum, '__version__'))
 
+    def test_native_tool_detection_reads_both_streams(self):
+        """U4 regression (v1.5.0-alpha.7): detection must not trust exit
+        codes or single streams -- real certutil prints usage to STDOUT with
+        rc=1, and fsum 2.51 prints its banner to STDERR. The old checks
+        rejected every native tool, silently forcing Python hashing."""
+        import sys as _sys
+        from unittest import mock
+
+        calc = dazzlesum.DazzleHashCalculator('sha256')
+        hashing_mod = _sys.modules[type(calc).__module__]
+
+        def fake_run(cmd, **kwargs):
+            r = mock.Mock()
+            tool = cmd[0]
+            if tool == 'certutil':
+                r.returncode, r.stdout, r.stderr = 1, 'Usage:\n  CertUtil [Options]', ''
+            elif tool == 'fsum':
+                r.returncode, r.stdout, r.stderr = 0, '', 'SlavaSoft Optimizing Checksum Utility - fsum 2.51'
+            else:
+                raise FileNotFoundError(tool)
+            return r
+
+        with mock.patch.object(hashing_mod.subprocess, 'run', side_effect=fake_run):
+            self.assertTrue(calc._tool_available('certutil'))
+            self.assertTrue(calc._tool_available('fsum'))
+            self.assertFalse(calc._tool_available('no-such-tool'))
+
+    def test_python_first_hash_ordering(self):
+        """Engine-order regression (v1.5.0-alpha.7): hashlib-supported
+        algorithms must hash in-process. Native tools cost a per-file
+        subprocess spawn (~75ms for certutil, >100x slower on small files)
+        and hash raw bytes, bypassing line-ending normalization -- so a
+        native digest would not even match existing manifests for CRLF
+        text files. Native is reserved for algorithms hashlib lacks."""
+        import hashlib as _hashlib
+        from unittest import mock
+
+        content = b'\x00binary\r\ncontent'  # null byte: never normalized
+        blob = os.path.join(self.test_dir, 'ordering.bin')
+        with open(blob, 'wb') as f:
+            f.write(content)
+
+        calc = dazzlesum.DazzleHashCalculator('sha256')
+        # hashlib covers sha256, so no native tool is probed at all
+        self.assertIsNone(calc.native_tool)
+
+        # Even with a native tool forced onto the calculator, the hot path
+        # must not consult it for a hashlib-supported algorithm
+        calc.native_tool = 'certutil'
+        with mock.patch.object(type(calc), '_calculate_with_native_tool') as native:
+            digest = calc.calculate_file_hash(Path(blob))
+        native.assert_not_called()
+        self.assertEqual(digest, _hashlib.sha256(content).hexdigest())
+
+    def test_unc_layer_via_filekit(self):
+        """Guard (v1.5.0-alpha.7): the UNC layer must be genuinely wired.
+        The old direct unctools soft-import silently failed for months
+        (HAVE_UNCTOOLS False on every modern install) with no test noticing;
+        UNC support now flows through dazzle-filekit and must be present."""
+        self.assertTrue(dazzlesum.HAVE_UNCTOOLS)
+        self.assertTrue(callable(dazzlesum.is_unc_path))
+        self.assertFalse(dazzlesum.is_unc_path('C:/plain/local/path'))
+        self.assertFalse(hasattr(dazzlesum, 'normalize_path'),
+                         "normalize_path was removed from the public surface in 1.5.0")
+
     def test_version_string(self):
         """Test that version string exists and is reasonable."""
         version = dazzlesum.__version__
@@ -76,6 +141,20 @@ class TestBasicFunctionality(unittest.TestCase):
         self.assertTrue(hasattr(dazzlesum, 'SHASUM_FILENAME'))
         filename = dazzlesum.SHASUM_FILENAME
         self.assertEqual(filename, '.shasum')
+
+    def test_calculate_hashes_dazzlelib_shape(self):
+        """calculate_hashes emits the dazzle-lib HashResultDict shape.
+
+        The DazzleLib cross-layer boundary: hex digests keyed by algorithm
+        name, matching filekit verification.calculate_file_hash output.
+        """
+        calc = dazzlesum.DazzleHashCalculator(algorithm='sha256')
+        result = calc.calculate_hashes(Path(self.test_file))
+        self.assertEqual(list(result.keys()), ['sha256'])
+        digest = result['sha256']
+        self.assertIsInstance(digest, str)
+        self.assertEqual(len(digest), 64)
+        self.assertEqual(digest, calc.calculate_file_hash(Path(self.test_file)))
 
 
 class TestHelperFunctions(unittest.TestCase):

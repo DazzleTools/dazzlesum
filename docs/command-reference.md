@@ -261,11 +261,21 @@ dazzlesum verify --checksum-file checksums.sha256 /target/directory
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 130 | Interrupted by user (Ctrl+C) |
+`verify` grades its exit code by verification severity, so scripts and CI can distinguish "one file drifted" from "the volume is damaged" without parsing output. Failed and missing files both count against the success percentage; extra files alone cap the result at code 2.
+
+| Code | Status label | Verified (rounded) |
+|------|--------------|--------------------|
+| 0 | SUCCESS | 100%, no extra files |
+| 1 | -- | General error (bad arguments, unreadable manifest, etc.) |
+| 2 | SUCCESS / ALMOST PERFECT | 100% with extra files present, or 99% |
+| 3 | SOME ISSUES | 95-98% |
+| 4 | FAILS | 80-94% |
+| 5 | MANY FAILS | 50-79% |
+| 6 | MOSTLY FAILS | 1-49% |
+| 7 | FAILURE | 0% |
+| 130 | -- | Interrupted by user (Ctrl+C) |
+
+Example: 9 of 10 files verified is 90% -> `FAILS`, exit code 4. A directory with no expected files but unexpected extras reports `UNEXPECTED FILES`, exit code 4.
 
 ## Environment Variables
 
