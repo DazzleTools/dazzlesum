@@ -98,6 +98,37 @@ class TestVersioningSystem(unittest.TestCase):
                 self.assertEqual(len(commit_part), 8)  # 8-character hash
                 self.assertRegex(commit_part, r'^[a-f0-9]{8}$')
 
+    def test_full_display_version_carries_build_stamp(self):
+        """`-V` must surface the build stamp, not just the release number.
+
+        A pip install, a clone, and a worktree can all report the same
+        release number while being different code; the parenthetical
+        (branch, build number, date, commit hash) is what disambiguates
+        them. Format matches the DazzleTools convention:
+        `[PHASE ]X.Y.Z[-phase] (full_stamp)`.
+        """
+        # Accessed off the top-level module so this holds for BOTH targets:
+        # the package re-exports these, and the stitched artifact defines
+        # them at module level.
+        full = dazzlesum.get_full_display_version()
+        display = dazzlesum.get_display_version()
+        self.assertTrue(full.startswith(display))
+
+        if '_' in dazzlesum.__version__:
+            # Stamped build: the stamp appears verbatim in parentheses
+            self.assertIn(f"({dazzlesum.__version__})", full)
+            self.assertRegex(full, r'\(\S+_\S+_\d+-\d{8}-[a-f0-9]{8}')
+        else:
+            # Unstamped checkout degrades to the bare display form
+            self.assertEqual(full, display)
+
+        # The project phase is shown only while the project is pre-stable
+        if dazzlesum.PROJECT_PHASE and dazzlesum.PROJECT_PHASE != 'stable':
+            self.assertTrue(display.startswith(dazzlesum.PROJECT_PHASE.upper()))
+        else:
+            self.assertEqual(display, dazzlesum.get_base_version())
+        self.assertNotIn('None', display)
+
     def test_version_comparison_compatibility(self):
         """Test that version can be compared for basic ordering."""
         version = dazzlesum.__version__

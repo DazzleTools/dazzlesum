@@ -24,7 +24,7 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 
-from ._version import __version__, get_package_version
+from ._version import __version__, get_package_version, get_full_display_version  # noqa: F401
 from .constants import (logger, SUPPORTED_ALGORITHMS, DEFAULT_ALGORITHM,
                         SHASUM_FILENAME, HAVE_UNCTOOLS, is_windows)
 from . import state
@@ -676,11 +676,14 @@ For detailed help on any command: %(prog)s <command> --help
 For comprehensive examples: %(prog)s examples
         """)
     
-    # Version at main level. get_package_version() derives from
-    # MAJOR/MINOR/PATCH and is always current; __version__ is the git-hook
-    # build stamp, which can be stale on machines without the hooks installed.
+    # Version at main level. The full display form carries the project
+    # phase and the build stamp (branch, build number, date, commit) so a
+    # user can tell exactly which build they are running -- a pip install,
+    # a clone, and a worktree can all report the same release number while
+    # being different code. Degrades to the bare version when no stamp is
+    # baked in (a checkout whose hooks have not run).
     parser.add_argument('--version', '-V', action='version',
-                       version=f'dazzlesum {get_package_version()}')
+                       version=f'dazzlesum {get_full_display_version()}')
     
     # Create subparsers
     subparsers = parser.add_subparsers(dest='command', help='Available commands',

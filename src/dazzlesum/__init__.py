@@ -39,8 +39,12 @@ from ._version import (  # noqa: F401
     PATCH,
     PHASE,
     PRE_RELEASE_NUM,
+    PROJECT_PHASE,
     __author__,
     __version__,
+    get_base_version,
+    get_display_version,
+    get_full_display_version,
     get_package_version,
 )
 from .constants import (  # noqa: F401

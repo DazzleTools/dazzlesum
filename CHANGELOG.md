@@ -10,69 +10,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
-## [1.5.0-alpha.7] - 2026-08-02
+## [1.5.0] - 2026-08-02
 
-### Fixed
-- Native checksum-tool detection now reads BOTH output streams and no longer trusts exit codes: real certutil prints its usage text to stdout with returncode 1, and fsum 2.51 prints its banner to stderr -- the old stdout-only / rc==0 checks rejected every native tool, silently forcing the pure-Python hashing fallback on all machines tested
-- The optional unctools integration had been silently dead since unctools 0.2.0 removed the APIs it soft-imported (the graceful fallback masked the ImportError, so the "enhanced UNC handling" never actually ran); UNC-aware path handling now flows through dazzle-filekit, whose path-identity layer is unctools-backed by hard dependency, and a guard test asserts the layer is genuinely wired
-
-### Changed
-- Hashing engine order flipped to Python-first: hashlib (in-process, OpenSSL-backed) handles every algorithm it supports; native tools are reserved for algorithms hashlib lacks. With detection fixed, native-first would have engaged certutil's per-file subprocess spawn (~75ms measured, >100x slower on small files -- a multi-million-file baseline would regress from minutes to days) AND broken verification of existing manifests: native tools hash raw bytes, bypassing the line-ending normalization every existing manifest was built with. Regression test pins the ordering; `--force-python` unchanged
-- Compat helpers `is_windows`, `safe_open`, and `file_exists` now delegate to dazzle-filekit (`is_windows`, `operations.open_file`, `utils.compat.path_exists_cross_platform`); `is_unc_path` (filekit) joins the public surface
-
-### Removed
-- `normalize_path` removed from the public surface: it was a retired unctools-era compat name whose actual behavior was always the no-op fallback; filekit's `normalize_cross_platform_path` serves the real use case, and hot paths deliberately do not normalize
-
-### Documentation
-- v1.5.0 ship-readiness checklist (`tests/checklists/`): smoke set plus artifact self-containment (bare-venv proof), real native-tool detection, UNC layer, and regression spot-checks for the src/ split line
-- Exit-codes reference now documents the full verify severity ladder (0-7 graded by success percentage, plus 1/130); the old table listed only 0, 1, and 130, leaving codes 2-7 undiscoverable to scripts
-- README hashing and platform claims corrected to match the Python-first engine and the filekit-backed UNC layer (the old text advertised native-tools-first and "optional unctools"); PyPI downloads badge added (pepy.tech -> pypistats)
-- Installation guide, requirements.txt, and CONTRIBUTING corrected for the 1.5.0 reality: Python floor 3.9 (was claiming 3.7), dazzle-lib/dazzle-filekit as the package's real dependencies (was claiming "none" plus optional unctools), and the src/ package as the development surface with `dazzlesum.py` as a generated artifact (was instructing "keep as single file")
-
-## [1.5.0-alpha.6] - 2026-07-17
+Dazzlesum is now a proper Python package, and scanning is roughly seven times faster. Two long-standing silent failures were also found and fixed: native checksum-tool detection had been rejecting every tool it probed, and the optional UNC integration had been dead since a dependency dropped the APIs it relied on.
 
 ### Added
-- `DazzleHashCalculator.calculate_hashes()`: the DazzleLib ecosystem boundary -- same computation as `calculate_file_hash` (native tool first, normalized Python fallback), returned as `dazzle_lib.HashResultDict` (hex digests keyed by algorithm name, the shape filekit `verification.calculate_file_hash` produces and the stack consumes)
-
-## [1.5.0-alpha.5] - 2026-07-17
-
-### Changed
-- Monolithic-file relative paths are computed via filekit `paths.compute_relative_path` (relpath with absolute-path fallback on cross-drive `ValueError` -- the exact contract previously inlined); the cross-drive warning is preserved
-
-## [1.5.0-alpha.4] - 2026-07-17
-
-### Changed
-- dazzlesum now depends on the DazzleLib stack: `dazzle-lib>=0.6.7` and `dazzle-filekit>=0.3.2` are hard install dependencies (Phase 2 of the src/ refactor -- reuse over rewrite, no fallback shims)
-- `.shasum` writes go through filekit `operations.atomic_write_text` -- the same tmp-sibling + `os.replace` idiom the code previously inlined (byte-identical output, same `.shasum.tmp` sibling name, same newline translation)
-- The stitched single-file artifact stays self-contained: `scripts/build_monolith.py` strips DazzleLib imports and inlines the exact objects used at build time from the installed library source, each under a provenance comment
-- Packaging: the dynamic version attr now reads the stdlib-only `dazzlesum._version` submodule instead of importing the whole package (which would fail in isolated build environments lacking the new runtime deps)
-
-## [1.5.0-alpha.2] - 2026-07-17
+- `src/dazzlesum/` package structure: the 4,300-line monolith is now 12 focused modules (`cli`, `engine`, `hashing`, `manifest`, `output`, `patterns`, `results`, `shadow`, `state`, `statecache`, `walk`, `constants`), installable with `pip install dazzlesum` and runnable via `python -m dazzlesum`
+- The single-file `dazzlesum.py` continues to work for portable, dependency-free use. It is now a **generated artifact**, stitched from the package at build time with the library objects it uses inlined under provenance comments, so it runs on the standard library alone. The test suite runs against both the package and the artifact, so the two cannot silently diverge
+- `DazzleHashCalculator.calculate_hashes()`: returns hex digests keyed by algorithm as `dazzle_lib.HashResultDict`, the shape the DazzleLib stack produces and consumes
 
 ### Performance
-- Junction/symlink policy moved to DISCOVERY: child directories are filtered using the parent scandir's cached reparse data (zero extra syscalls) instead of two lstats per directory at processing time; only the walk root keeps the explicit check
-- Threaded worker default raised to min(16, 2 x cores): scan workers are I/O-bound, and oversubscription keeps the disk queue full -- measured 4.45 min at 16 workers vs 8.82 at 8 on the 3.38M-file reference library. **Full-library steady-state: 32.83 min (v1.4.4) -> 4.45 min (7.4x).**
+**Full-library steady-state sweep: 32.83 min (v1.4.4) -> 4.45 min (7.4x)** on a 3.38M-file reference library.
+
+- Junction and symlink policy moved to discovery: child directories are filtered from the parent scandir's cached reparse data at zero extra syscalls, instead of two lstat calls per directory at processing time
+- Compiled string-level pattern matching: basename include/exclude patterns compile once into a single regex matched against entry names, eliminating per-file `Path` construction and per-pattern `Path.match` in the scan hot loop (profiled at ~330 us/file). Multi-component patterns keep exact `Path.match` semantics via fallback, with equivalence pinned by a corpus test
+- Per-directory `Path.resolve()` eliminated: the old code made four `_getfinalpathname` syscalls per directory (~45s per 20K directories)
+- Threaded scanning: `update --threads N`, default `min(16, 2 x cores)`. Workers perform scandir/stat/junction syscalls while the cache, hashing, manifest writes, and totals stay on the coordinating thread; `--threads 1` is the unchanged serial path. Scan workers are I/O-bound, so oversubscription keeps the disk queue full -- 4.45 min at 16 workers versus 8.82 at 8
+- Visited-set redesign: physical walks use a string-key duplicate guard rather than resolve-and-stat inode marking -- four fewer syscalls per directory, and a syscall-free critical section under threading
 
 ### Fixed
-- StateCache batches now also flush on a 5-second interval, bounding hard-kill cache loss in TIME as well as folder count (previously a TerminateProcess on a tree smaller than 200 dirs forfeited the whole run's cache; found by adversarial checklist agent). Ctrl-C always flushed via close().
+- **Coverage hole**: inode-based visited marking stat'ed *through* junctions and recorded target inodes before the follow-policy check, so any junction pointing into a subtree caused the real subtree to be skipped as an already-visited loop. This was silent and deterministic in every scan since the feature existed -- a ~16K-file subtree was invisible to all previous scans of the reference library, including its committed baseline. Physical walks no longer consult inodes
+- **Native checksum-tool detection** now reads both output streams and no longer trusts exit codes. Real tools disagree wildly here: certutil prints its usage text to stdout with return code 1, and fsum 2.51 prints its banner to stderr. The old stdout-only and `rc==0` checks rejected every native tool, silently forcing the pure-Python fallback on every machine tested
+- **The optional unctools integration had been silently dead** since unctools 0.2.0 removed the APIs it soft-imported; the graceful fallback masked the ImportError, so the advertised UNC handling never ran. UNC-aware path handling now flows through dazzle-filekit, whose path-identity layer is unctools-backed by hard dependency, and a guard test asserts the layer is genuinely wired
+- StateCache batches flush on a 5-second interval as well as by folder count, bounding cache loss from a hard kill in time as well as volume (previously a forced termination on a tree smaller than 200 directories forfeited the whole run's cache). Ctrl-C always flushed
+
+### Changed
+- `--version` / `-V` now reports the build provenance, not just the release number: `dazzlesum 1.5.0 (1.5.0_main_99-20260802-8387f603)` -- release, branch, build number, date, and commit. A pip install, a clone, and a working tree can all report the same release number while being different code, and the parenthetical is what tells them apart. The project phase is shown ahead of the version while a project is pre-stable (`BETA 0.7.5 (...)`), matching the convention used across the DazzleTools projects; output degrades to the bare version when no build stamp is present
+- **Hashing engine is Python-first**: hashlib (in-process, OpenSSL-backed) handles every algorithm it supports, and native tools are reserved for algorithms it lacks. With detection fixed, native-first would have engaged a subprocess spawn per file (~75ms for certutil; a ~130-file tree took 16.7s versus 0.62s) *and* broken verification of existing manifests, since native tools hash raw bytes and bypass the line-ending normalization every existing manifest was built with. `--force-python` is unchanged
+- dazzlesum now depends on the DazzleLib stack: `dazzle-lib>=0.6.7` and `dazzle-filekit>=0.3.2` are hard install dependencies (reuse over rewrite, no fallback shims). The single-file artifact remains dependency-free
+- `.shasum` writes go through filekit `operations.atomic_write_text` -- the same tmp-sibling and `os.replace` idiom previously inlined, with byte-identical output
+- Monolithic-file relative paths are computed via filekit `paths.compute_relative_path`, preserving the cross-drive fallback and warning
+- Compat helpers `is_windows`, `safe_open`, and `file_exists` delegate to dazzle-filekit; `is_unc_path` joins the public surface
+- Packaging reads the version from the standard-library-only `dazzlesum._version` submodule rather than importing the whole package, which would fail in isolated build environments
+
+### Removed
+- `normalize_path` from the public surface: a retired unctools-era compat name whose behavior was always the no-op fallback. Filekit's `normalize_cross_platform_path` serves the real use case, and hot paths deliberately do not normalize
+- The hand-rolled `hooks/` directory, superseded by the repokit-common hook system in use since v1.4.2
 
 ### Documentation
-- v1.4.4 checklist prerequisites fixed to actually construct the pure-extras fixture its HV.3 requires (agent finding); adversarial re-run of both checklists against the optimized engine recorded -- all HV items pass, including serial-vs-threaded manifest-set equivalence and junction handling under threading
-
-## [1.5.0-alpha.1] - 2026-07-17
-
-### Performance
-- Compiled string-level pattern matching: all basename include/exclude patterns compile once into a single regex matched against entry names; multi-component patterns keep exact `Path.match` semantics via fallback. Kills per-file `Path` construction and per-pattern `Path.match` in the scan hot loop (was ~330 us/file profiled). Equivalence with legacy semantics pinned by a corpus test.
-- Per-directory `Path.resolve()` elimination: folder keys via string `relpath`, shadow paths and `--dirs-from` containment via try-first `relative_to` with resolve fallback. The old code performed four `_getfinalpathname` syscalls per directory (profiled at ~45s per 20K dirs).
-- Threaded scanning: `update --threads N` (default auto = min(8, cores)); worker threads perform scandir/stat/junction syscalls, while the cache, hashing, manifest writes, and totals stay on the coordinating thread. `--threads 1` is the unchanged serial path.
-- Visited-set redesign: physical (non-link-following) walks use a string-key duplicate guard instead of resolve+stat inode marking -- four fewer syscalls per directory and, in threaded mode, a syscall-free critical section.
-- Combined: the 20K-dir profile slice dropped 152s -> 33s before threading; full-library steady-state numbers recorded in the v1.4.4 Epic checklist.
-
-### Fixed
-- Coverage hole: inode-based visited marking stat()ed THROUGH junctions and recorded target inodes before the follow-policy check, so any junction pointing into a subtree caused the real subtree to be skipped as an "already visited" loop -- silently and deterministically, in every scan since the feature existed (a ~16K-file venv subtree was invisible to all previous scans of the reference library, including its committed baseline). Physical walks no longer consult inodes.
-
-### Changed
-- Version format tests understand the `-PHASE` segment (1.5.0-alpha builds)
+- Ship-readiness checklist under `tests/checklists/`: artifact self-containment proven in a dependency-free virtualenv, real native-tool behavior, UNC layer, and regression spot-checks -- the verification a mocked suite structurally cannot perform
+- Exit-codes reference now documents the full verify severity ladder (0-7 graded by verified percentage); the old table listed only 0, 1, and 130, leaving the rest undiscoverable to scripts
+- README, installation guide, `requirements.txt`, and CONTRIBUTING corrected for the 1.5.0 reality: Python floor 3.9 (was claiming 3.7), real package dependencies (was claiming none), the Python-first engine, and `src/` as the development surface with `dazzlesum.py` as a generated artifact (was instructing "keep as single file")
 
 ## [1.4.5] - 2026-07-17
 
