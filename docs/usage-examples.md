@@ -1,6 +1,23 @@
 # Usage Examples
 
-This document provides practical examples for common dazzlesum use cases (v1.3.6+).
+This document provides practical examples for common dazzlesum use cases.
+
+## Choosing what to process
+
+Every command accepts an optional directory argument, so you rarely need to `cd` anywhere first. Omit it to work on the current directory:
+
+```bash
+dazzlesum create -r                          # current directory
+dazzlesum create -r /srv/archive             # absolute path
+dazzlesum create -r ../sibling-project       # relative path
+dazzlesum create -r "D:\Media\Photos 2026"   # quote paths containing spaces
+dazzlesum create -r \\server\share\backups   # UNC network share
+```
+
+The same argument works for `verify`, `update`, and `manage`. Two related options are worth knowing:
+
+- `--shadow-dir DIR` writes manifests somewhere other than the folder being scanned, leaving the source tree untouched.
+- `--dirs-from FILE` (on `update`) processes only the directories listed in a file, which is how you drive a scoped update from a change detector such as a git hook or filesystem watcher.
 
 ## Basic Workflow
 
@@ -11,6 +28,9 @@ dazzlesum create
 
 # Process entire project recursively
 dazzlesum create -r
+
+# Process a folder you are not currently in
+dazzlesum create -r /srv/archive
 
 # Use SHA512 for extra security
 dazzlesum create -r --algorithm sha512
@@ -182,11 +202,16 @@ dazzlesum -r "//server/share" --shadow-dir ./local-checksums
 ### Debug Mode
 ```bash
 # Maximum verbosity for debugging
-dazzlesum -r --verify -vvv
+dazzlesum verify -r -vvv
 
-# Force Python implementation if native tools fail
-dazzlesum -r --force-python
+# Show which hashing engine was selected (tool-selection line needs -vvvv)
+dazzlesum create -r -vvvv
 ```
+
+Hashing runs in-process through Python `hashlib`, so there is no native-tool
+process to fall back from. The `--force-python` flag was removed in 1.5.1 --
+delete it from any script that passes it; what it described is now the default.
+See [platforms.md](platforms.md#hashing-engine).
 
 ### Permission Issues
 ```bash

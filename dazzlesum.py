@@ -74,13 +74,13 @@ state = sys.modules[__name__]
 # ===========================================================================
 
 
-# ---- vendored: dazzle_filekit.is_windows (dazzle-filekit 0.4.2) ----
+# ---- vendored: dazzle_filekit.is_windows (dazzle-filekit 0.4.3) ----
 def is_windows():
     """Self-contained artifact equivalent of dazzle_filekit.is_windows."""
     return os.name == 'nt'
 
 
-# ---- vendored: dazzle_filekit.paths.is_unc_path (dazzle-filekit 0.4.2) ----
+# ---- vendored: dazzle_filekit.paths.is_unc_path (dazzle-filekit 0.4.3) ----
 def is_unc_path(path):
     """Self-contained artifact equivalent of dazzle_filekit.paths.is_unc_path
     (approximation: UNC = leading double separator; the package uses the
@@ -89,7 +89,7 @@ def is_unc_path(path):
     return s.startswith('\\\\') or s.startswith('//')
 
 
-# ---- vendored: dazzle_filekit.operations.open_file (dazzle-filekit 0.4.2) ----
+# ---- vendored: dazzle_filekit.operations.open_file (dazzle-filekit 0.4.3) ----
 def open_file(path, mode='r', *args, **kwargs):
     """Self-contained artifact equivalent of dazzle_filekit.operations.open_file
     (plain open; the package version adds UNC variant-resolution fallback)."""
@@ -97,7 +97,7 @@ def open_file(path, mode='r', *args, **kwargs):
 safe_open = open_file
 
 
-# ---- vendored: dazzle_filekit.utils.compat.path_exists_cross_platform (dazzle-filekit 0.4.2) ----
+# ---- vendored: dazzle_filekit.utils.compat.path_exists_cross_platform (dazzle-filekit 0.4.3) ----
 def path_exists_cross_platform(path):
     """Self-contained artifact equivalent of
     dazzle_filekit.utils.compat.path_exists_cross_platform."""
@@ -111,7 +111,7 @@ HashResultDict = Dict[str, str]
 (alias of dazzle_lib.payloads.HashResultDict)."""
 
 
-# ---- vendored: dazzle_filekit.paths.compute_relative_path (dazzle-filekit 0.4.2) ----
+# ---- vendored: dazzle_filekit.paths.compute_relative_path (dazzle-filekit 0.4.3) ----
 def compute_relative_path(
     target: Union[str, Path],
     start: Union[str, Path],
@@ -150,7 +150,7 @@ def compute_relative_path(
         return target_abs if fallback_to_absolute else None
 
 
-# ---- vendored: dazzle_filekit.operations.atomic_write_text (dazzle-filekit 0.4.2) ----
+# ---- vendored: dazzle_filekit.operations.atomic_write_text (dazzle-filekit 0.4.3) ----
 def atomic_write_text(
     path: Union[str, Path],
     content: str,
@@ -212,13 +212,13 @@ def atomic_write_text(
 # (component-per-line form is what its parser expects)
 MAJOR = 1
 MINOR = 5
-PATCH = 0
+PATCH = 1
 PHASE = ""  # Per-MINOR feature set: None, "alpha", "beta", "rc1", etc.
 PRE_RELEASE_NUM = 7
 PROJECT_PHASE = "stable"  # Project-wide: "prealpha", "alpha", "beta", "stable"
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0_main_100-20260803-8387f603"
+__version__ = "1.5.1_main_104-20260807-82e38cfe"
 
 
 def get_package_version():
@@ -4597,8 +4597,11 @@ def create_parent_parser():
                        help='Follow symbolic links and junctions')
     parent.add_argument('--line-endings', choices=['auto', 'unix', 'windows', 'preserve'],
                        default='auto', help='Line ending handling strategy')
-    parent.add_argument('--force-python', action='store_true',
-                       help='Force Python implementation (skip native tools)')
+    # --force-python was REMOVED in 1.5.1. Python hashlib became the engine
+    # for every algorithm this CLI offers in 1.5.0, leaving the flag nothing
+    # to force; honouring it could only REMOVE capability, since on a
+    # restricted-crypto build where hashlib cannot construct md5/sha1 the
+    # native tool is the only working path.
     parent.add_argument('-y', '--yes', action='store_true',
                        help='Answer yes to all prompts')
     
@@ -4782,7 +4785,6 @@ Common Options (available for all commands):
   --verbosity LEVEL     Set verbosity level directly (-6 to +4, overrides -q/-v)
   --no-color            Disable colored output
   --show-log-types      Show log type prefixes (INFO, ERROR, WARNING)
-  --force-python        Force Python implementation (skip native tools)
   -y, --yes             Answer yes to all prompts
 
 Command-Specific Options:
@@ -5020,13 +5022,7 @@ def execute_create_action(args, directory):
         resume_mode=args.resume,
         yes_to_all=args.yes
     )
-    
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        if not args.summary:
-            logger.info("Forcing Python implementation")
-    
+
     # Log generation mode
     mode_descriptions = {
         'individual': 'Individual .shasum files per directory',
@@ -5070,12 +5066,7 @@ def execute_verify_action(args, directory):
         shadow_dir=args.shadow_dir,
         yes_to_all=args.yes
     )
-    
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        logger.info("Forcing Python implementation")
-    
+
     # Squelch settings are initialized by the verbosity system
     # Apply any explicit --squelch overrides on top of verbosity-based settings
     
@@ -5114,11 +5105,6 @@ def execute_update_action(args, directory):
         shadow_dir=args.shadow_dir,
         yes_to_all=args.yes
     )
-
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        logger.info("Forcing Python implementation")
 
     # Optional folder list from an external change-detection source
     dirs = None

@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Future features and improvements will be listed here
 
+## [1.5.1] - 2026-08-07
+
+### Documentation
+- The optional `[directory]` argument is now shown in examples across the README, usage guide, and command reference. It has always worked on every command -- `dazzlesum create -r /srv/archive`, a quoted path with spaces, a UNC share, or a relative path -- but every example used the current directory, so nothing advertised it
+- Platform support moved to `docs/platforms.md` with a verification matrix (what is verified versus designed-for-but-unverified), the fallback tools probed per platform, junction and symlink policy, line-ending behavior, and the reasoning behind the Python-first hashing order. The platform badge now links there
+- README corrected where it still described the pre-1.5.0 world: two separate blocks claimed "Dependencies: None (pure Python standard library)" plus optional unctools, which stopped being true when the DazzleLib stack became a hard dependency. The distinction that actually matters -- the pip package has dependencies, the standalone `dazzlesum.py` has none -- is now stated in both places
+- License section names the copyright holder, as GPL-3.0 expects
+- "Future Possible Features" no longer lists incremental updates, which shipped in v1.4.0
+- CONTRIBUTING branch strategy corrected to the flow actually in use (feature branches from `main`, merged back with `--no-ff`); it described a `dev` branch that does not exist
+- Ship-readiness checklist notes that the `-V` comparison in HV.1b requires a clean tree: the post-commit hook restamps `_version.py` after each commit, so in a dirty tree a source build and the committed artifact legitimately disagree
+
+### Removed
+- `--force-python`. Python `hashlib` became the engine for every algorithm the CLI offers in 1.5.0, so the flag had nothing left to force -- it set an already-empty native-tool selection and logged "Forcing Python implementation" for a run that was already pure Python. Honouring it could only *remove* capability: on a restricted-crypto (FIPS) build where `hashlib` cannot construct md5 or sha1, the native tool is the only working path, and suppressing it would turn a working run into a crash. **If a script passes the flag, delete it** -- the behavior it described is now unconditional. The native-tool machinery is retained for the restricted-crypto case
+
+### Changed
+- repokit-common subtree updated v0.2.7 -> v0.2.8 (pre-commit word-split path handling; hooks reach subtrees outside `scripts/`)
+
 ## [1.5.0] - 2026-08-02
 
 Dazzlesum is now a proper Python package, and scanning is roughly seven times faster. Two long-standing silent failures were also found and fixed: native checksum-tool detection had been rejecting every tool it probed, and the optional UNC integration had been dead since a dependency dropped the APIs it relied on.

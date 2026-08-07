@@ -70,7 +70,7 @@ Before submitting:
 
 ### Pull Request Process
 
-1. **Fork and Branch**: Create a feature branch from `dev`
+1. **Fork and Branch**: Create a feature branch from `main`
 2. **Clear Description**: Explain what your PR does and why
 3. **Link Issues**: Reference any related issues
 4. **Test Coverage**: Ensure your changes work as expected
@@ -80,9 +80,9 @@ Before submitting:
 #### Branch Strategy
 
 This project uses a simple branch strategy:
-- `main`: Stable, production-ready code
-- `dev`: Development and testing
-- Feature branches: Created from `dev`, merged back to `dev`
+- `main`: Stable, production-ready code -- releases are tagged here
+- Feature branches: created from `main`, merged back with `git merge --no-ff` so the branch's history stays visible in the graph
+- `dev`: a historical branch, fully merged into `main` and no longer used. Do not branch from it
 
 ## Development Notes
 

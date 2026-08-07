@@ -622,8 +622,11 @@ def create_parent_parser():
                        help='Follow symbolic links and junctions')
     parent.add_argument('--line-endings', choices=['auto', 'unix', 'windows', 'preserve'],
                        default='auto', help='Line ending handling strategy')
-    parent.add_argument('--force-python', action='store_true',
-                       help='Force Python implementation (skip native tools)')
+    # --force-python was REMOVED in 1.5.1. Python hashlib became the engine
+    # for every algorithm this CLI offers in 1.5.0, leaving the flag nothing
+    # to force; honouring it could only REMOVE capability, since on a
+    # restricted-crypto build where hashlib cannot construct md5/sha1 the
+    # native tool is the only working path.
     parent.add_argument('-y', '--yes', action='store_true',
                        help='Answer yes to all prompts')
     
@@ -807,7 +810,6 @@ Common Options (available for all commands):
   --verbosity LEVEL     Set verbosity level directly (-6 to +4, overrides -q/-v)
   --no-color            Disable colored output
   --show-log-types      Show log type prefixes (INFO, ERROR, WARNING)
-  --force-python        Force Python implementation (skip native tools)
   -y, --yes             Answer yes to all prompts
 
 Command-Specific Options:
@@ -1045,13 +1047,7 @@ def execute_create_action(args, directory):
         resume_mode=args.resume,
         yes_to_all=args.yes
     )
-    
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        if not args.summary:
-            logger.info("Forcing Python implementation")
-    
+
     # Log generation mode
     mode_descriptions = {
         'individual': 'Individual .shasum files per directory',
@@ -1095,12 +1091,7 @@ def execute_verify_action(args, directory):
         shadow_dir=args.shadow_dir,
         yes_to_all=args.yes
     )
-    
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        logger.info("Forcing Python implementation")
-    
+
     # Squelch settings are initialized by the verbosity system
     # Apply any explicit --squelch overrides on top of verbosity-based settings
     
@@ -1139,11 +1130,6 @@ def execute_update_action(args, directory):
         shadow_dir=args.shadow_dir,
         yes_to_all=args.yes
     )
-
-    # Force Python implementation if requested
-    if args.force_python:
-        generator.calculator.native_tool = None
-        logger.info("Forcing Python implementation")
 
     # Optional folder list from an external change-detection source
     dirs = None

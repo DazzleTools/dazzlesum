@@ -32,10 +32,15 @@ dazzlesum create [options] [directory]
 **Examples:**
 ```bash
 dazzlesum create -r                           # Generate individual checksums recursively
+dazzlesum create -r /srv/archive              # Process a folder you are not in
+dazzlesum create -r "D:\Media\Photos 2026"    # Quote paths containing spaces
+dazzlesum create -r \\server\share\backups    # UNC network share
 dazzlesum create -r --mode monolithic         # Generate single checksum file
 dazzlesum create -r --mode both               # Generate both individual and monolithic
 dazzlesum create -r --resume                  # Resume interrupted operation
 ```
+
+The trailing `[directory]` is optional on every command and defaults to the current directory. `--shadow-dir` additionally separates *where manifests are written* from *what is scanned*.
 
 ### `verify` - Verify Checksums
 
@@ -149,7 +154,6 @@ These options are available for all commands:
 | `--line-endings {auto,unix,windows,preserve}` | Line ending handling strategy |
 | `--no-color` | Disable colored output |
 | `--show-log-types` | Show log type prefixes (INFO, ERROR, WARNING) |
-| `--force-python` | Force Python implementation (skip native tools) |
 | `-y`, `--yes` | Answer yes to all prompts |
 | `--help` | Show help message and exit |
 | `--version` | Show program version and exit |

@@ -6,7 +6,7 @@
 [![CI](https://github.com/DazzleTools/dazzlesum/actions/workflows/python.yml/badge.svg)](https://github.com/DazzleTools/dazzlesum/actions)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3-green.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20BSD-lightgrey.svg)](#installation)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20BSD-lightgrey.svg)](docs/platforms.md)
 
 Dazzlesum is a handy checksum tool designed for data integrity verification across different machines and operating systems. It generates folder-specific checksum files (`.shasum`) that enable verification of file collections, with special attention to DOS shell compatibility and cross-platform consistency.
 
@@ -49,8 +49,8 @@ Automatically handle different representations of network paths across systems w
 
 - Python 3.9 or higher
 - Operating System: Windows, macOS, Linux, BSD
-- Dependencies: None (pure Python standard library)
-- Optional: [`unctools` package](https://github.com/djdarcy/UNCtools) for enhanced Windows UNC path support
+- Dependencies: `dazzle-lib` and `dazzle-filekit`, installed automatically by pip. UNC-aware path handling comes through filekit, which is backed by [`unctools`](https://github.com/djdarcy/UNCtools)
+- The standalone `dazzlesum.py` has no dependencies at all -- see [Standalone](#standalone-no-install) below
 
 ### Install from PyPI
 
@@ -88,12 +88,17 @@ python dazzlesum.py --help
 
 ### Generate checksums (using new subcommand syntax)
 
+Every command takes an optional directory argument. Leave it off to work on the current directory, or name any folder -- local, relative, or a network share:
+
 ```bash
 # Generate checksums for current directory
 dazzlesum create
 
 # Generate checksums recursively
 dazzlesum create -r
+
+# ...or point it anywhere else
+dazzlesum create -r \\server\share\backups
 
 # Create monolithic checksum file
 dazzlesum create -r --mode monolithic
@@ -182,33 +187,17 @@ dazzlesum shadow      # Shadow directory help
 
 ## Platform Support
 
-### Windows
-- **Command Prompt**: Full ASCII compatibility
-- **PowerShell**: Native support
-- **Hashing**: In-process Python hashlib; `certutil`/`fsum` detected as fallback
-- **Paths**: UNC-aware handling through the dazzle-filekit dependency (backed by [`unctools`](https://github.com/djdarcy/UNCtools))
+Windows, Linux, macOS, and BSD. Hashing runs in-process via Python `hashlib` on every platform; native tools are a fallback for algorithms it lacks. Text files are line-ending normalized before hashing, so manifests generated on one platform verify on another. Junctions and symlinks are not followed by default.
 
-### macOS/Linux
-- **Terminal**: Full compatibility
-- **Hashing**: In-process Python hashlib; `shasum`/`sha256sum` detected as fallback
-- **Paths**: Native Unix path handling
-- **Performance**: Optimized for large file trees
-
-### Cross-Platform Features
-- **Path Normalization**: Automatic path separator handling
-- **Line Ending Support**: Configurable line ending strategies
-- **Symlink Safety**: Intelligent symlink and junction detection
-- **Encoding**: UTF-8 with fallback handling
+See **[docs/platforms.md](docs/platforms.md)** for the verification matrix, per-platform behavior, and the reasoning behind the hashing engine order.
 
 ## Requirements
 
 - **Python**: 3.9 or higher
-- **Operating System**: Windows, macOS, Linux, BSD
-- **Dependencies**: None (pure Python standard library)
-- **Optional**: [`unctools` package](https://github.com/djdarcy/UNCtools) for enhanced Windows UNC path support
+- **Operating System**: Windows, macOS, Linux, BSD -- see [docs/platforms.md](docs/platforms.md)
+- **Dependencies**: `dazzle-lib` and `dazzle-filekit` for the pip package (installed automatically); none at all for the standalone `dazzlesum.py`
 
 ## Future Possible Features
-- **Incremental Updates**: Smart update detection
 - **Compression**: Archive support for checksum collections
 - **Remote Storage**: Cloud backup integration? (maybe)
 
@@ -228,7 +217,9 @@ Like the project?
 
 ## License
 
-This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
+dazzlesum, Copyright (C) 2026 Dustin Darcy
+
+Licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) (GPL-3.0) -- see [LICENSE](LICENSE)
 
 ## Changelog
 

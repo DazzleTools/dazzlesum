@@ -89,6 +89,29 @@ class TestBasicFunctionality(unittest.TestCase):
         native.assert_not_called()
         self.assertEqual(digest, _hashlib.sha256(content).hexdigest())
 
+    def test_force_python_removed_and_python_is_the_engine(self):
+        """--force-python was removed in v1.5.1.
+
+        Python hashlib became the engine for every algorithm this CLI offers
+        in 1.5.0, leaving the flag nothing to force. Honouring it could only
+        REMOVE capability: on a restricted-crypto build where hashlib cannot
+        construct md5/sha1, the native tool is the only working path, so
+        suppressing it would turn a working run into a crash.
+
+        Pins both halves -- the flag is gone from the parser, and the
+        behavior it claimed to provide is now unconditional.
+        """
+        parser = dazzlesum.create_argument_parser()
+        with self.assertRaises(SystemExit) as caught:
+            parser.parse_args(['create', '--force-python', self.test_dir])
+        self.assertEqual(caught.exception.code, 2, 'argparse usage error')
+
+        # The behavior the flag described is now the default, unconditionally
+        for algorithm in dazzlesum.SUPPORTED_ALGORITHMS:
+            calc = dazzlesum.DazzleHashCalculator(algorithm)
+            self.assertIsNone(calc.native_tool,
+                              f'{algorithm} should hash in-process')
+
     def test_unc_layer_via_filekit(self):
         """Guard (v1.5.0-alpha.7): the UNC layer must be genuinely wired.
         The old direct unctools soft-import silently failed for months

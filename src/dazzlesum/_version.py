@@ -11,13 +11,13 @@ points here).
 # (component-per-line form is what its parser expects)
 MAJOR = 1
 MINOR = 5
-PATCH = 0
+PATCH = 1
 PHASE = ""  # Per-MINOR feature set: None, "alpha", "beta", "rc1", etc.
 PRE_RELEASE_NUM = 7
 PROJECT_PHASE = "stable"  # Project-wide: "prealpha", "alpha", "beta", "stable"
 
 # Static version string (updated automatically by git hooks)
-__version__ = "1.5.0_main_100-20260803-8387f603"
+__version__ = "1.5.1_main_104-20260807-82e38cfe"
 
 
 def get_package_version():
